@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="A daily to-do list with a live stopwatch, a flow chart of the work, and totals for yesterday, today, and tomorrow." />
+  <meta name="theme-color" content="#18202b" />
+  <title>Daybook</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:wght@500;600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="brand">
+        <p class="kicker">To-do list</p>
+        <h1>Daybook</h1>
+      </div>
+      <div class="wall">
+        <p class="eyebrow">Now</p>
+        <p id="wall-clock" class="time wall-clock">--:--:--</p>
+        <p id="wall-date" class="quiet"></p>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="panel list-panel" aria-labelledby="list-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="list-title">Today</h2>
+            <p id="list-date" class="quiet"></p>
+          </div>
+          <button type="button" class="btn" id="back-today" data-action="select-today" hidden>Back to today</button>
+        </div>
+        <p id="list-stats" class="quiet"></p>
+        <form id="composer" autocomplete="off">
+          <label id="composer-label" for="task-input">Add to today</label>
+          <div class="composer-row">
+            <input id="task-input" maxlength="140" autocomplete="off" autocapitalize="sentences" required placeholder="What do you need to do?" />
+            <button class="btn primary" type="submit">Add</button>
+          </div>
+        </form>
+        <div id="task-list"></div>
+        <div id="day-total" class="day-total" hidden></div>
+      </section>
+
+      <aside class="side">
+        <section id="day-cards" aria-label="Yesterday, today, and tomorrow">
+          <p class="empty">Loading your days…</p>
+        </section>
+
+        <section id="stopwatch" aria-label="Stopwatch">
+          <p class="empty">Loading the stopwatch…</p>
+        </section>
+
+        <section class="panel" aria-labelledby="history-title">
+          <h2 id="history-title">Day to day</h2>
+          <p class="quiet intro">Hours for the last seven days.</p>
+          <div id="history"></div>
+        </section>
+
+        <section class="panel flow-panel" aria-labelledby="flow-title">
+          <h2 id="flow-title">Flow chart</h2>
+          <p class="quiet intro">The order you worked, with the time on each step.</p>
+          <div id="flow"></div>
+        </section>
+      </aside>
+    </main>
+
+    <footer>
+      <p class="footnote">
+        <span id="save-note">Saved in this browser, on this computer.</span>
+        Clearing this site’s data clears your days.
+      </p>
+    </footer>
+  </div>
+  <p id="live" class="sr-only" aria-live="polite"></p>
+  <noscript>Daybook needs JavaScript to keep your list and your timer.</noscript>
+  <script src="app.js"></script>
+</body>
+</html>

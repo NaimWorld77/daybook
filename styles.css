@@ -850,6 +850,18 @@ header {
   font-size: 13px;
 }
 
+.footnote.byline {
+  margin-bottom: 0;
+  font-family: var(--serif);
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+}
+
+.footnote.byline + .footnote {
+  margin-top: 4px;
+}
+
 @media (max-width: 860px) {
   .workspace {
     grid-template-columns: 1fr;

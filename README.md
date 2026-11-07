@@ -25,6 +25,8 @@ Live site: [https://naimworld77.github.io/daybook/](https://naimworld77.github.i
 
 Your list stays in this browser on this computer. It is still there after you close the page. Clearing the site’s data in the browser clears the days. The tasks are not stored in this GitHub repository.
 
+You can send the live link to a friend. They get their own list. Press **Sign up** and the top corner shows the name, email, and picture entered on that computer. A friend who signs up on their computer sees their own name, not yours.
+
 ## Run it on your computer
 
 The site is one HTML page, a stylesheet, and a script. No build step is required.

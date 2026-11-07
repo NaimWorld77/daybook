@@ -870,8 +870,9 @@
     const max = Math.max(...values, 1);
     bars.forEach((bar, index) => {
       const ms = values[index];
-      const px = ms <= 0 ? 2 : Math.max(6, Math.round((ms / max) * usable));
+      const px = ms <= 0 ? 2 : Math.max(6, Math.min(usable, Math.round((ms / max) * usable)));
       bar.style.height = `${px}px`;
+      bar.style.maxHeight = `${usable}px`;
       bar.classList.toggle("is-empty", ms <= 0);
     });
   }

@@ -359,7 +359,7 @@
       }
     }
     const task = found.task;
-    if (task.status === "running") return;
+    if (task.status === "running" || task.status === "done") return;
     task.completedAt = null;
     task.status = "running";
     task.startedAt = now;
@@ -603,10 +603,14 @@
     });
     title.value = task.title;
     const actions = el("div", { class: "task-actions" });
-    if (task.status === "running") actions.append(actionButton("Pause", "pause", task.id));
-    else actions.append(actionButton(task.status === "pending" ? "Start" : "Resume", "start", task.id));
-    if (task.status === "running" || task.status === "paused") {
+    if (task.status === "running") {
+      actions.append(actionButton("Pause", "pause", task.id));
       actions.append(actionButton("Done", "done", task.id, "good"));
+    } else if (task.status === "paused") {
+      actions.append(actionButton("Resume", "start", task.id));
+      actions.append(actionButton("Done", "done", task.id, "good"));
+    } else if (task.status === "pending") {
+      actions.append(actionButton("Start", "start", task.id));
     }
     const remove = actionButton(confirmDelete === task.id ? "Remove?" : "Delete", "delete", task.id, confirmDelete === task.id ? "danger" : "");
     actions.append(remove);
@@ -858,20 +862,15 @@
     document.getElementById("history").replaceChildren(...parts);
   }
 
-  function paintBars(now = Date.now(), retried = false) {
+  function paintBars(now = Date.now()) {
     const bars = [...document.querySelectorAll("[data-week-bar]")];
     if (!bars.length) return;
-    const trackHeight = bars[0].parentElement ? bars[0].parentElement.clientHeight : 0;
-    if (trackHeight < 20 && !retried) {
-      requestAnimationFrame(() => paintBars(Date.now(), true));
-      return;
-    }
-    const usable = trackHeight || 80;
+    const usable = 64;
     const values = bars.map((bar) => dayTotal(bar.getAttribute("data-week-bar"), now));
     const max = Math.max(...values, 1);
     bars.forEach((bar, index) => {
       const ms = values[index];
-      const px = ms <= 0 ? 2 : Math.max(8, Math.round((ms / max) * usable));
+      const px = ms <= 0 ? 2 : Math.max(6, Math.round((ms / max) * usable));
       bar.style.height = `${px}px`;
       bar.classList.toggle("is-empty", ms <= 0);
     });

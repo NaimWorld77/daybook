@@ -318,6 +318,19 @@ header {
   color: #9f1d14;
 }
 
+.goal-card.is-unset {
+  background: #fff;
+  color: var(--muted);
+}
+
+.goal-card.is-unset .goal-mark {
+  display: none;
+}
+
+.goal-progress:empty {
+  display: none;
+}
+
 .goal-day {
   font-size: 12px;
   font-weight: 600;

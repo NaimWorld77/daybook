@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:wght@500;600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=7" />
+  <link rel="stylesheet" href="styles.css?v=8" />
 </head>
 <body>
   <div class="page">
@@ -37,6 +37,7 @@
         <option value="tomorrow">Tomorrow</option>
         <option value="day-cards">Yesterday, today, tomorrow</option>
         <option value="stopwatch">Stopwatch</option>
+        <option value="goal-panel">Daily goal</option>
         <option value="history-panel">Day to day</option>
         <option value="flow-panel">Flow chart</option>
       </select>
@@ -93,6 +94,24 @@
           <p class="empty">Loading the stopwatch…</p>
         </section>
 
+        <section class="panel" id="goal-panel" aria-labelledby="goal-title">
+          <h2 id="goal-title">Daily goal</h2>
+          <p class="quiet intro">Set the hours you want to work every day.</p>
+          <form id="goal-form">
+            <div class="goal-fields">
+              <label>Hours
+                <input id="goal-hours" name="hours" type="number" min="0" max="24" step="1" inputmode="numeric" value="0" />
+              </label>
+              <label>Minutes
+                <input id="goal-minutes" name="minutes" type="number" min="0" max="59" step="1" inputmode="numeric" value="0" />
+              </label>
+              <button class="btn primary" type="submit">Set goal</button>
+            </div>
+            <p id="goal-error" class="signup-error" hidden></p>
+          </form>
+          <div id="goal-board"></div>
+        </section>
+
         <section class="panel" id="history-panel" aria-labelledby="history-title">
           <h2 id="history-title">Day to day</h2>
           <p class="quiet intro">Hours for the last seven days.</p>
@@ -117,6 +136,6 @@
   </div>
   <p id="live" class="sr-only" aria-live="polite"></p>
   <noscript>Daybook needs JavaScript to keep your list and your timer.</noscript>
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

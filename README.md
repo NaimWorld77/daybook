@@ -14,7 +14,7 @@ Live site: [https://naimworld77.github.io/daybook/](https://naimworld77.github.i
 - **Yesterday**, **today**, and **tomorrow** are the smaller cards. Click one to see that day’s list.
 - The flow chart lines the tasks up in the order you worked them, with the time on each step.
 - **Day to day** shows the hours for the last seven days, plus the total of every day you have recorded.
-- **Daily goal** is the hours you want to work each day. A day gets a green tick when you reach it, and stays red when you do not. After midnight, today becomes yesterday and keeps that result. The new day starts its own count.
+- **Daily goal** is the hours you want to work each day, starting on the day you set it. Earlier days say **Didn't add a goal**. From that day on, a day gets a green tick when you reach it, and stays red when you do not. After midnight, today becomes yesterday and keeps that result. The new day starts its own count.
 
 ## How to use it
 

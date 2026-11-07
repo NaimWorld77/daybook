@@ -953,19 +953,39 @@
     paintGoals(stamp);
   }
 
-  function goalMs() {
+  function loadGoal() {
     try {
       const data = JSON.parse(localStorage.getItem(GOAL_KEY) || "null");
       const ms = Number(data && data.ms);
-      if (!Number.isFinite(ms) || ms <= 0) return 0;
-      return Math.min(ms, 24 * 60 * 60 * 1000);
+      if (!Number.isFinite(ms) || ms <= 0) return { ms: 0, since: "" };
+      const since = typeof data.since === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.since)
+        ? data.since
+        : "";
+      return { ms: Math.min(ms, 24 * 60 * 60 * 1000), since };
     } catch {
-      return 0;
+      return { ms: 0, since: "" };
     }
   }
 
+  function goalMs() {
+    return loadGoal().ms;
+  }
+
+  function goalSince() {
+    const goal = loadGoal();
+    if (!goal.ms) return "";
+    return goal.since || todayKey();
+  }
+
   function saveGoal(ms) {
-    localStorage.setItem(GOAL_KEY, JSON.stringify({ ms }));
+    const since = loadGoal().since || todayKey();
+    localStorage.setItem(GOAL_KEY, JSON.stringify({ ms, since }));
+  }
+
+  function rememberGoalStart() {
+    const goal = loadGoal();
+    if (!goal.ms || goal.since) return;
+    localStorage.setItem(GOAL_KEY, JSON.stringify({ ms: goal.ms, since: todayKey() }));
   }
 
   function loadGoalResults() {
@@ -982,8 +1002,10 @@
   }
 
   function goalCredit(taskId, results) {
+    const since = goalSince();
     let sum = 0;
-    Object.values(results).forEach((record) => {
+    Object.entries(results).forEach(([key, record]) => {
+      if (since && key < since) return;
       const portion = record && record.counted && Number(record.counted[taskId]);
       if (Number.isFinite(portion) && portion > 0) sum += portion;
     });
@@ -998,7 +1020,8 @@
 
   function settleGoalDays(now = new Date()) {
     const goal = goalMs();
-    if (!goal) return;
+    const since = goalSince();
+    if (!goal || !since) return;
     const today = todayKey(now);
     const stamp = now.getTime();
     const results = loadGoalResults();
@@ -1006,6 +1029,13 @@
     for (let i = 1; i <= 7; i += 1) keys.add(addDays(today, -i));
     let changed = false;
     [...keys].sort().forEach((key) => {
+      if (key < since) {
+        if (results[key]) {
+          delete results[key];
+          changed = true;
+        }
+        return;
+      }
       if (results[key]) return;
       const counted = {};
       let totalMs = 0;
@@ -1032,7 +1062,7 @@
     if (!goal) {
       root.replaceChildren(el("p", {
         class: "empty",
-        text: "Set a daily goal. A day gets a green tick when you reach it. After midnight that day stays on yesterday, green if you made it and red if you did not. The new day starts its own count.",
+        text: "Set a daily goal. From that day on, a day gets a green tick when you reach it. Earlier days say you didn't add a goal.",
       }));
       return;
     }
@@ -1054,18 +1084,28 @@
     const goal = goalMs();
     if (!goal) return;
     const today = todayKey(new Date(stamp));
+    const since = goalSince();
     const results = loadGoalResults();
     document.querySelectorAll("[data-goal-day]").forEach((card) => {
       const key = card.getAttribute("data-goal-day");
+      const mark = card.querySelector("[data-goal-mark]");
+      const progress = card.querySelector("[data-goal-progress]");
+      const state = card.querySelector("[data-goal-state]");
+      if (since && key < since) {
+        card.classList.remove("is-met", "is-short");
+        card.classList.add("is-unset");
+        setText(mark, "");
+        setText(progress, "");
+        setText(state, "Didn't add a goal");
+        return;
+      }
+      card.classList.remove("is-unset");
       const saved = key < today ? results[key] : null;
       const total = saved ? saved.totalMs : goalDayTotal(key, stamp, results);
       const target = saved ? saved.goalMs : goal;
       const met = saved ? Boolean(saved.met) : total >= target;
       card.classList.toggle("is-met", met);
       card.classList.toggle("is-short", !met);
-      const mark = card.querySelector("[data-goal-mark]");
-      const progress = card.querySelector("[data-goal-progress]");
-      const state = card.querySelector("[data-goal-state]");
       setText(mark, met ? "✓" : "×");
       setText(progress, `${formatWords(total, !saved && liveFor(key))} of ${formatWords(target)}`);
       setText(state, met ? "Goal completed" : "Goal not completed");
@@ -1226,6 +1266,7 @@
   function init() {
     state = loadState();
     if (enforceSingleRunner(state.days)) save();
+    rememberGoalStart();
     settleGoalDays();
     const moved = rollUnfinished();
     knownToday = todayKey();

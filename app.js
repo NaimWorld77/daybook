@@ -480,8 +480,13 @@
     if (task.status === "running") return "Timing";
     if (task.status === "paused") return "Paused";
     if (task.status === "done") {
-      if ((task.accumulatedMs || 0) <= 0) return "Done · no time recorded";
-      return task.completedAt ? `Done at ${clockTime(task.completedAt)}` : "Done";
+      const doneAt = task.completedAt ? `Done at ${clockTime(task.completedAt)}` : "Done";
+      const startedAt = task.firstStartedAt
+        || (task.completedAt && task.accumulatedMs > 0 ? task.completedAt - task.accumulatedMs : null);
+      if ((task.accumulatedMs || 0) <= 0) {
+        return task.completedAt ? `${doneAt} · no time recorded` : "Done · no time recorded";
+      }
+      return startedAt ? `Started at ${clockTime(startedAt)} · ${doneAt}` : doneAt;
     }
     return "Not started";
   }

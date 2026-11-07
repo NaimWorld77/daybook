@@ -2,6 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "daybook.v1";
+  const PROFILE_KEY = "daybook.profile.v1";
 
   let state = { days: {}, selected: "" };
   let confirmDelete = null;
@@ -942,6 +943,111 @@
     else if (action === "done") completeTask(id);
     else if (action === "toggle") toggleTask(id);
     else if (action === "delete") deleteTask(id);
+    else if (action === "signup") openSignup();
+    else if (action === "signout") signOut();
+  }
+
+  function loadProfile() {
+    try {
+      const data = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null");
+      if (!data || typeof data.name !== "string" || typeof data.email !== "string") return null;
+      const name = data.name.trim().slice(0, 80);
+      const email = data.email.trim().slice(0, 120);
+      if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+      const picture = typeof data.picture === "string" && data.picture.startsWith("data:image/")
+        ? data.picture
+        : "";
+      return { name, email, picture };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveProfile(profile) {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  }
+
+  function renderAccount() {
+    const root = document.getElementById("account");
+    const profile = loadProfile();
+    if (!profile) {
+      root.replaceChildren(el("button", {
+        type: "button",
+        class: "btn primary",
+        "data-action": "signup",
+        text: "Sign up",
+      }));
+      return;
+    }
+    const avatar = profile.picture
+      ? el("img", { class: "avatar", src: profile.picture, alt: "" })
+      : el("span", {
+        class: "avatar avatar-letter",
+        text: profile.name.slice(0, 1).toUpperCase(),
+        "aria-hidden": "true",
+      });
+    root.replaceChildren(
+      el("div", { class: "who" }, [
+        avatar,
+        el("div", {}, [
+          el("p", { class: "who-name", text: profile.name }),
+          el("p", { class: "who-email", text: profile.email }),
+        ]),
+      ]),
+      el("button", {
+        type: "button",
+        class: "btn who-out",
+        "data-action": "signout",
+        text: "Sign out",
+      }),
+    );
+  }
+
+  function openSignup() {
+    const dialog = document.getElementById("signup");
+    const error = document.getElementById("signup-error");
+    error.hidden = true;
+    error.textContent = "";
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function signOut() {
+    localStorage.removeItem(PROFILE_KEY);
+    renderAccount();
+    announce("Signed out. Your tasks are still on this computer.");
+  }
+
+  function readPicture(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) {
+        resolve("");
+        return;
+      }
+      if (!file.type || !file.type.startsWith("image/")) {
+        reject(new Error("Choose a picture file."));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("That picture could not be read."));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("That picture could not be read."));
+        img.onload = () => {
+          const size = 96;
+          const canvas = document.createElement("canvas");
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext("2d");
+          const scale = Math.max(size / img.width, size / img.height);
+          const width = img.width * scale;
+          const height = img.height * scale;
+          ctx.drawImage(img, (size - width) / 2, (size - height) / 2, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.82));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   function init() {
@@ -957,6 +1063,29 @@
     document.addEventListener("visibilitychange", () => tick());
     window.addEventListener("focus", () => tick());
     renderAll();
+    renderAccount();
+    document.getElementById("signup-cancel").addEventListener("click", () => {
+      document.getElementById("signup").close();
+    });
+    document.getElementById("signup-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const error = document.getElementById("signup-error");
+      const name = form.name.value.trim();
+      const email = form.email.value.trim();
+      error.hidden = true;
+      try {
+        const picture = await readPicture(form.picture.files[0]);
+        saveProfile({ name, email, picture });
+        form.reset();
+        document.getElementById("signup").close();
+        renderAccount();
+        announce(`Signed in as ${name}.`);
+      } catch (err) {
+        error.textContent = err && err.message ? err.message : "Sign up did not finish.";
+        error.hidden = false;
+      }
+    });
     setInterval(tick, 250);
   }
 

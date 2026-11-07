@@ -232,6 +232,81 @@ header {
   padding: 8px 16px;
 }
 
+.goal-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.goal-fields label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.goal-fields input {
+  display: block;
+  width: 76px;
+  margin-top: 4px;
+  border: 1px solid #e0d5c4;
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 16px;
+}
+
+.goal-fields .btn.primary {
+  padding: 8px 14px;
+}
+
+.goal-board {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.goal-card {
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.goal-card.is-met {
+  background: #e5f6ec;
+  border-color: #8fceaa;
+  color: #146c3a;
+}
+
+.goal-card.is-short {
+  background: #fff1ef;
+  border-color: #f0b4ab;
+  color: #9f1d14;
+}
+
+.goal-day {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.goal-progress,
+.goal-state {
+  margin-top: 2px;
+}
+
+.goal-state {
+  font-weight: 600;
+}
+
+.goal-card.is-met .goal-progress,
+.goal-card.is-short .goal-progress {
+  color: inherit;
+}
+
 .section-nav {
   display: flex;
   align-items: center;
@@ -263,6 +338,7 @@ header {
 #list,
 #day-cards,
 #stopwatch,
+#goal-panel,
 #history-panel,
 #flow-panel {
   scroll-margin-top: 12px;

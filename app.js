@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "daybook.v1";
   const PROFILE_KEY = "daybook.profile.v1";
+  const GOAL_KEY = "daybook.goal.v1";
 
   let state = { days: {}, selected: "" };
   let confirmDelete = null;
@@ -948,6 +949,65 @@
       : "Daybook";
     if (document.title !== nextTitle) document.title = nextTitle;
     paintBars(stamp);
+    paintGoals(stamp);
+  }
+
+  function goalMs() {
+    try {
+      const data = JSON.parse(localStorage.getItem(GOAL_KEY) || "null");
+      const ms = Number(data && data.ms);
+      if (!Number.isFinite(ms) || ms <= 0) return 0;
+      return Math.min(ms, 24 * 60 * 60 * 1000);
+    } catch {
+      return 0;
+    }
+  }
+
+  function saveGoal(ms) {
+    localStorage.setItem(GOAL_KEY, JSON.stringify({ ms }));
+  }
+
+  function renderGoal() {
+    const root = document.getElementById("goal-board");
+    const goal = goalMs();
+    const hours = document.getElementById("goal-hours");
+    const minutes = document.getElementById("goal-minutes");
+    if (hours && document.activeElement !== hours) hours.value = String(Math.floor(goal / 3600000));
+    if (minutes && document.activeElement !== minutes) {
+      minutes.value = String(Math.floor((goal % 3600000) / 60000));
+    }
+    if (!goal) {
+      root.replaceChildren(el("p", {
+        class: "empty",
+        text: "Set a daily goal. A day turns green when you reach it, and red when you do not.",
+      }));
+      return;
+    }
+    const cards = lastNDays(7).slice().reverse().map((key) => el("article", {
+      class: "goal-card",
+      "data-goal-day": key,
+    }, [
+      el("p", { class: "goal-day", text: dayRelation(key) || formatCardDate(key) }),
+      el("p", { class: "goal-progress", "data-goal-progress": key, text: "" }),
+      el("p", { class: "goal-state", "data-goal-state": key, text: "" }),
+    ]));
+    root.replaceChildren(el("div", { class: "goal-board" }, cards));
+  }
+
+  function paintGoals(stamp) {
+    const goal = goalMs();
+    if (!goal) return;
+    document.querySelectorAll("[data-goal-day]").forEach((card) => {
+      const key = card.getAttribute("data-goal-day");
+      const total = dayTotal(key, stamp);
+      const met = total >= goal;
+      card.classList.toggle("is-met", met);
+      card.classList.toggle("is-short", !met);
+      const progress = card.querySelector("[data-goal-progress]");
+      const state = card.querySelector("[data-goal-state]");
+      setText(progress, `${formatWords(total, liveFor(key))} of ${formatWords(goal)}`);
+      setText(state, met ? "Goal completed" : "Goal not completed");
+    });
   }
 
   function renderAll() {
@@ -957,6 +1017,7 @@
     renderTasks();
     renderFlow();
     renderHistory();
+    renderGoal();
     paintTimes(Date.now());
   }
 
@@ -1109,6 +1170,24 @@
     document.getElementById("composer").addEventListener("submit", (event) => {
       event.preventDefault();
       addTask();
+    });
+    document.getElementById("goal-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const error = document.getElementById("goal-error");
+      const hours = Math.max(0, Math.min(24, Math.floor(Number(form.hours.value) || 0)));
+      const minutes = Math.max(0, Math.min(59, Math.floor(Number(form.minutes.value) || 0)));
+      const ms = ((hours * 60) + minutes) * 60 * 1000;
+      if (ms <= 0) {
+        error.textContent = "Enter at least 1 minute.";
+        error.hidden = false;
+        return;
+      }
+      error.hidden = true;
+      saveGoal(ms);
+      renderGoal();
+      paintGoals(Date.now());
+      announce(`Daily goal set to ${formatWords(ms)}.`);
     });
     document.getElementById("section-menu").addEventListener("change", (event) => {
       goToSection(event.target.value);

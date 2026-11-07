@@ -173,6 +173,37 @@
     return state.days[key];
   }
 
+  function rollUnfinished(now = new Date()) {
+    const today = todayKey(now);
+    const stamp = now.getTime();
+    const keys = Object.keys(state.days).filter((key) => key < today).sort();
+    const carried = [];
+    for (const key of keys) {
+      const day = state.days[key];
+      if (!day || !Array.isArray(day.tasks)) continue;
+      const staying = [];
+      for (const task of day.tasks) {
+        if (task.status === "done") {
+          staying.push(task);
+          continue;
+        }
+        if (task.status === "running") {
+          task.accumulatedMs = elapsed(task, stamp);
+          task.startedAt = null;
+          task.status = "paused";
+        }
+        carried.push(task);
+      }
+      if (staying.length) day.tasks = staying;
+      else delete state.days[key];
+    }
+    if (!carried.length) return 0;
+    const day = ensureDay(today);
+    day.tasks = carried.concat(day.tasks);
+    save();
+    return carried.length;
+  }
+
   function findTask(id) {
     for (const [key, day] of Object.entries(state.days)) {
       const task = day.tasks.find((item) => item.id === id);
@@ -920,7 +951,11 @@
     const key = todayKey(now);
     if (key !== knownToday) {
       knownToday = key;
+      const moved = rollUnfinished(now);
       renderAll();
+      if (moved) announce(moved === 1
+        ? "Moved 1 unfinished task to today."
+        : `Moved ${moved} unfinished tasks to today.`);
       return;
     }
     const wall = document.getElementById("wall-clock");
@@ -1053,6 +1088,7 @@
   function init() {
     state = loadState();
     if (enforceSingleRunner(state.days)) save();
+    const moved = rollUnfinished();
     knownToday = todayKey();
     state.selected = knownToday;
     document.body.addEventListener("click", onClick);
@@ -1064,6 +1100,11 @@
     window.addEventListener("focus", () => tick());
     renderAll();
     renderAccount();
+    if (moved) {
+      announce(moved === 1
+        ? "Moved 1 unfinished task to today."
+        : `Moved ${moved} unfinished tasks to today.`);
+    }
     document.getElementById("signup-cancel").addEventListener("click", () => {
       document.getElementById("signup").close();
     });

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:wght@500;600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
   <div class="page">
@@ -19,12 +19,36 @@
         <p class="kicker">To-do list</p>
         <h1>Daybook</h1>
       </div>
-      <div class="wall">
-        <p class="eyebrow">Now</p>
-        <p id="wall-clock" class="time wall-clock">--:--:--</p>
-        <p id="wall-date" class="quiet"></p>
+      <div class="header-side">
+        <div id="account" class="account"></div>
+        <div class="wall">
+          <p class="eyebrow">Now</p>
+          <p id="wall-clock" class="time wall-clock">--:--:--</p>
+          <p id="wall-date" class="quiet"></p>
+        </div>
       </div>
     </header>
+
+    <dialog id="signup" class="signup">
+      <form id="signup-form">
+        <h2>Sign up</h2>
+        <p class="quiet">Your name, email, and picture stay on this computer. A friend who opens the same link signs up separately and sees their own name.</p>
+        <label for="signup-name">Name
+          <input id="signup-name" name="name" maxlength="80" autocomplete="name" required />
+        </label>
+        <label for="signup-email">Email
+          <input id="signup-email" name="email" type="email" maxlength="120" autocomplete="email" required />
+        </label>
+        <label for="signup-picture">Picture
+          <input id="signup-picture" name="picture" type="file" accept="image/*" />
+        </label>
+        <p id="signup-error" class="signup-error" hidden></p>
+        <div class="signup-actions">
+          <button type="button" class="btn" id="signup-cancel">Cancel</button>
+          <button type="submit" class="btn primary">Sign up</button>
+        </div>
+      </form>
+    </dialog>
 
     <main class="workspace">
       <section class="panel list-panel" aria-labelledby="list-title">
@@ -80,6 +104,6 @@
   </div>
   <p id="live" class="sr-only" aria-live="polite"></p>
   <noscript>Daybook needs JavaScript to keep your list and your timer.</noscript>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

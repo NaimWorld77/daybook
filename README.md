@@ -9,7 +9,8 @@ Live site: [https://naimworld77.github.io/daybook/](https://naimworld77.github.i
 - The to-do list is the main panel. Add a task, then work through the list.
 - A task that is not finished is **red**.
 - Press the circle when you finish it. The row turns **green** and shows a tick.
-- Press **Start** when you begin a task. The stopwatch counts hours, minutes, and seconds until you pause or mark it done.
+- Press **Start** on the stopwatch to time something without a task. **End** stops that clock. That time stays on the stopwatch and is not added to a task.
+- Press **Start** on a task when the time should count on that task. The stopwatch then follows the task until you pause or mark it done.
 - Only one task runs at a time. Starting another task pauses the one that was running.
 - **Yesterday**, **today**, and **tomorrow** are the smaller cards. Click one to see that day’s list.
 - The flow chart lines the tasks up in the order you worked them, with the time on each step.

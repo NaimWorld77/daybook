@@ -268,10 +268,30 @@ header {
 }
 
 .goal-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   border-radius: 12px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   background: #fff;
+}
+
+.goal-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  border: 2px solid transparent;
+}
+
+.goal-copy {
+  min-width: 0;
 }
 
 .goal-card.is-met {
@@ -280,9 +300,21 @@ header {
   color: #146c3a;
 }
 
+.goal-card.is-met .goal-mark {
+  background: #1b7047;
+  border-color: #1b7047;
+  color: #fff;
+}
+
 .goal-card.is-short {
   background: #fff1ef;
   border-color: #f0b4ab;
+  color: #9f1d14;
+}
+
+.goal-card.is-short .goal-mark {
+  background: #fff;
+  border-color: #c2412d;
   color: #9f1d14;
 }
 

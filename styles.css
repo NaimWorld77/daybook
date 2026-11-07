@@ -567,6 +567,7 @@ header {
 .composer-row {
   display: flex;
   gap: 8px;
+  margin-bottom: 16px;
 }
 
 .composer-row input {

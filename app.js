@@ -341,6 +341,15 @@
     document.querySelectorAll(`[data-title-for="${safe}"]`).forEach((node) => setText(node, label));
   }
 
+  function goToSection(value) {
+    if (!value) return;
+    if (value === "yesterday") selectDay(addDays(todayKey(), -1));
+    else if (value === "tomorrow") selectDay(addDays(todayKey(), 1));
+    else if (value === "list") selectDay(todayKey());
+    const target = document.getElementById(value === "yesterday" || value === "tomorrow" ? "list" : value);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function selectDay(key) {
     if (!key) return;
     clearArmedDelete();
@@ -1095,6 +1104,9 @@
     document.getElementById("composer").addEventListener("submit", (event) => {
       event.preventDefault();
       addTask();
+    });
+    document.getElementById("section-menu").addEventListener("change", (event) => {
+      goToSection(event.target.value);
     });
     document.addEventListener("visibilitychange", () => tick());
     window.addEventListener("focus", () => tick());

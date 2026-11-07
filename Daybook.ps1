@@ -1,4 +1,5 @@
-$url = "https://NaimWorld77.github.io/daybook/"
+$stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$url = "https://naimworld77.github.io/daybook/?app=$stamp"
 
 $candidates = @(
   "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
@@ -15,6 +16,6 @@ if (-not $browser) {
 
 Start-Process -FilePath $browser -ArgumentList @(
   "--app=$url",
-  "--window-size=1180,840",
+  "--window-size=1480,920",
   "--new-window"
 )

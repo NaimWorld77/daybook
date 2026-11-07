@@ -23,6 +23,8 @@ Live site: [https://naimworld77.github.io/daybook/](https://naimworld77.github.i
 4. Press **Pause** if you stop in the middle. **Resume** continues from the same time.
 5. Press the circle, or **Done**, when the task is finished.
 
+Tasks you do not finish move to the next day. Finished tasks stay on the day you completed them.
+
 Your list stays in this browser on this computer. It is still there after you close the page. Clearing the site’s data in the browser clears the days. The tasks are not stored in this GitHub repository.
 
 You can send the live link to a friend. They get their own list. Press **Sign up** and the top corner shows the name, email, and picture entered on that computer. A friend who signs up on their computer sees their own name, not yours.

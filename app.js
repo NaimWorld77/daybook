@@ -4,6 +4,7 @@
   const STORAGE_KEY = "daybook.v1";
   const PROFILE_KEY = "daybook.profile.v1";
   const GOAL_KEY = "daybook.goal.v1";
+  const GOAL_RESULTS_KEY = "daybook.goal.results.v1";
 
   let state = { days: {}, selected: "" };
   let confirmDelete = null;
@@ -967,6 +968,58 @@
     localStorage.setItem(GOAL_KEY, JSON.stringify({ ms }));
   }
 
+  function loadGoalResults() {
+    try {
+      const data = JSON.parse(localStorage.getItem(GOAL_RESULTS_KEY) || "null");
+      return data && typeof data === "object" ? data : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveGoalResults(results) {
+    localStorage.setItem(GOAL_RESULTS_KEY, JSON.stringify(results));
+  }
+
+  function goalCredit(taskId, results) {
+    let sum = 0;
+    Object.values(results).forEach((record) => {
+      const portion = record && record.counted && Number(record.counted[taskId]);
+      if (Number.isFinite(portion) && portion > 0) sum += portion;
+    });
+    return sum;
+  }
+
+  function goalDayTotal(key, stamp, results) {
+    return dayTasks(key).reduce((sum, task) => {
+      return sum + Math.max(0, elapsed(task, stamp) - goalCredit(task.id, results));
+    }, 0);
+  }
+
+  function settleGoalDays(now = new Date()) {
+    const goal = goalMs();
+    if (!goal) return;
+    const today = todayKey(now);
+    const stamp = now.getTime();
+    const results = loadGoalResults();
+    const keys = new Set(Object.keys(state.days).filter((key) => key < today));
+    for (let i = 1; i <= 7; i += 1) keys.add(addDays(today, -i));
+    let changed = false;
+    [...keys].sort().forEach((key) => {
+      if (results[key]) return;
+      const counted = {};
+      let totalMs = 0;
+      dayTasks(key).forEach((task) => {
+        const portion = Math.max(0, elapsed(task, stamp) - goalCredit(task.id, results));
+        if (portion > 0) counted[task.id] = portion;
+        totalMs += portion;
+      });
+      results[key] = { totalMs, goalMs: goal, met: totalMs >= goal, counted };
+      changed = true;
+    });
+    if (changed) saveGoalResults(results);
+  }
+
   function renderGoal() {
     const root = document.getElementById("goal-board");
     const goal = goalMs();
@@ -979,7 +1032,7 @@
     if (!goal) {
       root.replaceChildren(el("p", {
         class: "empty",
-        text: "Set a daily goal. A day turns green when you reach it, and red when you do not.",
+        text: "Set a daily goal. A day gets a green tick when you reach it. After midnight that day stays on yesterday, green if you made it and red if you did not. The new day starts its own count.",
       }));
       return;
     }
@@ -987,9 +1040,12 @@
       class: "goal-card",
       "data-goal-day": key,
     }, [
-      el("p", { class: "goal-day", text: dayRelation(key) || formatCardDate(key) }),
-      el("p", { class: "goal-progress", "data-goal-progress": key, text: "" }),
-      el("p", { class: "goal-state", "data-goal-state": key, text: "" }),
+      el("span", { class: "goal-mark", "data-goal-mark": key, "aria-hidden": "true", text: "" }),
+      el("div", { class: "goal-copy" }, [
+        el("p", { class: "goal-day", text: dayRelation(key) || formatCardDate(key) }),
+        el("p", { class: "goal-progress", "data-goal-progress": key, text: "" }),
+        el("p", { class: "goal-state", "data-goal-state": key, text: "" }),
+      ]),
     ]));
     root.replaceChildren(el("div", { class: "goal-board" }, cards));
   }
@@ -997,15 +1053,21 @@
   function paintGoals(stamp) {
     const goal = goalMs();
     if (!goal) return;
+    const today = todayKey(new Date(stamp));
+    const results = loadGoalResults();
     document.querySelectorAll("[data-goal-day]").forEach((card) => {
       const key = card.getAttribute("data-goal-day");
-      const total = dayTotal(key, stamp);
-      const met = total >= goal;
+      const saved = key < today ? results[key] : null;
+      const total = saved ? saved.totalMs : goalDayTotal(key, stamp, results);
+      const target = saved ? saved.goalMs : goal;
+      const met = saved ? Boolean(saved.met) : total >= target;
       card.classList.toggle("is-met", met);
       card.classList.toggle("is-short", !met);
+      const mark = card.querySelector("[data-goal-mark]");
       const progress = card.querySelector("[data-goal-progress]");
       const state = card.querySelector("[data-goal-state]");
-      setText(progress, `${formatWords(total, liveFor(key))} of ${formatWords(goal)}`);
+      setText(mark, met ? "✓" : "×");
+      setText(progress, `${formatWords(total, !saved && liveFor(key))} of ${formatWords(target)}`);
       setText(state, met ? "Goal completed" : "Goal not completed");
     });
   }
@@ -1025,6 +1087,7 @@
     const now = new Date();
     const key = todayKey(now);
     if (key !== knownToday) {
+      settleGoalDays(now);
       knownToday = key;
       const moved = rollUnfinished(now);
       renderAll();
@@ -1163,6 +1226,7 @@
   function init() {
     state = loadState();
     if (enforceSingleRunner(state.days)) save();
+    settleGoalDays();
     const moved = rollUnfinished();
     knownToday = todayKey();
     state.selected = knownToday;
@@ -1185,6 +1249,7 @@
       }
       error.hidden = true;
       saveGoal(ms);
+      settleGoalDays();
       renderGoal();
       paintGoals(Date.now());
       announce(`Daily goal set to ${formatWords(ms)}.`);

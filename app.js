@@ -5,11 +5,13 @@
   const PROFILE_KEY = "daybook.profile.v1";
   const GOAL_KEY = "daybook.goal.v1";
   const GOAL_RESULTS_KEY = "daybook.goal.results.v1";
+  const WATCH_KEY = "daybook.watch.v1";
 
   let state = { days: {}, selected: "" };
   let confirmDelete = null;
   let confirmTimer = 0;
   let knownToday = "";
+  let freeWatch = { accumulatedMs: 0, startedAt: null };
 
   function el(tag, attrs = {}, children = []) {
     const node = document.createElement(tag);
@@ -385,10 +387,58 @@
     input.focus();
   }
 
+  function loadFreeWatch() {
+    try {
+      const data = JSON.parse(localStorage.getItem(WATCH_KEY) || "null");
+      freeWatch = {
+        accumulatedMs: Math.max(0, Number(data && data.accumulatedMs) || 0),
+        startedAt: Number(data && data.startedAt) || null,
+      };
+    } catch {
+      freeWatch = { accumulatedMs: 0, startedAt: null };
+    }
+  }
+
+  function saveFreeWatch() {
+    localStorage.setItem(WATCH_KEY, JSON.stringify(freeWatch));
+  }
+
+  function freeWatchRunning() {
+    return Boolean(freeWatch.startedAt);
+  }
+
+  function freeWatchElapsed(now = Date.now()) {
+    if (!freeWatch.startedAt) return freeWatch.accumulatedMs;
+    return freeWatch.accumulatedMs + Math.max(0, now - freeWatch.startedAt);
+  }
+
+  function freezeFreeWatch() {
+    if (!freeWatch.startedAt) return;
+    freeWatch.accumulatedMs = freeWatchElapsed();
+    freeWatch.startedAt = null;
+    saveFreeWatch();
+  }
+
+  function startFreeWatch() {
+    if (freeWatch.startedAt || runningTask()) return;
+    freeWatch = { accumulatedMs: 0, startedAt: Date.now() };
+    saveFreeWatch();
+    announce("Stopwatch started.");
+    renderAll();
+  }
+
+  function endFreeWatch() {
+    if (!freeWatch.startedAt) return;
+    freezeFreeWatch();
+    announce(`Stopwatch ended at ${formatClock(freeWatch.accumulatedMs)}.`);
+    renderAll();
+  }
+
   function startTask(id) {
     const found = findTask(id);
     if (!found) return;
     clearArmedDelete();
+    freezeFreeWatch();
     const now = Date.now();
     let pausedName = "";
     for (const day of Object.values(state.days)) {
@@ -584,17 +634,52 @@
   function renderStopwatch() {
     const running = runningTask();
     const root = document.getElementById("stopwatch");
-    root.className = running ? "watch" : "watch is-idle";
-    if (!running) {
+    const freeOn = !running && freeWatchRunning();
+    root.className = running || freeOn ? "watch" : "watch is-idle";
+    if (!running && !freeOn) {
+      const held = freeWatch.accumulatedMs > 0;
       root.replaceChildren(
         el("div", { class: "watch-main" }, [
           el("p", { class: "eyebrow", text: "Stopwatch" }),
-          el("h2", { class: "watch-task", text: "No task is running" }),
-          el("p", { class: "watch-time time", text: "00:00:00" }),
+          el("h2", { class: "watch-task", text: held ? "Stopped" : "Stopwatch" }),
+          el("p", {
+            class: "watch-time time",
+            "data-watch-time": "clock",
+            text: formatClock(freeWatch.accumulatedMs),
+          }),
           el("p", {
             class: "watch-help",
-            text: "Press Start on a task. That clock, and today’s total, both move until you pause or mark it done.",
+            text: "Press Start to time something on its own. End stops the clock. This time stays on the stopwatch and is not added to a task.",
           }),
+          el("div", { class: "watch-actions" }, [
+            el("button", { type: "button", class: "btn primary", "data-action": "watch-start", text: "Start" }),
+          ]),
+        ]),
+        watchSide(),
+      );
+      return;
+    }
+    if (freeOn) {
+      root.replaceChildren(
+        el("div", { class: "watch-main" }, [
+          el("p", { class: "eyebrow watch-kicker" }, [
+            el("span", { class: "rec", "aria-hidden": "true" }),
+            el("span", { text: "Stopwatch" }),
+          ]),
+          el("h2", { class: "watch-task", text: "Timing" }),
+          el("p", {
+            class: "watch-time time",
+            "data-watch-time": "clock",
+            text: formatClock(freeWatchElapsed()),
+          }),
+          el("p", {
+            class: "watch-words",
+            "data-watch-time": "words",
+            text: formatWords(freeWatchElapsed(), true),
+          }),
+          el("div", { class: "watch-actions" }, [
+            el("button", { type: "button", class: "btn primary", "data-action": "watch-end", text: "End" }),
+          ]),
         ]),
         watchSide(),
       );
@@ -944,10 +1029,19 @@
       const token = node.getAttribute("data-day-time");
       setText(node, textFor(node.getAttribute("data-format") || "compact", totalFor(token, stamp), liveFor(token)));
     });
+    document.querySelectorAll("[data-watch-time]").forEach((node) => {
+      if (freeWatch.startedAt && stamp < freeWatch.startedAt) {
+        freeWatch.startedAt = stamp;
+        saveFreeWatch();
+      }
+      setText(node, textFor(node.getAttribute("data-watch-time") || "clock", freeWatchElapsed(stamp), freeWatchRunning()));
+    });
     const running = runningTask();
     const nextTitle = running
       ? `${formatClock(elapsed(running.task, stamp))} · ${displayTitle(running.task)} · Daybook`
-      : "Daybook";
+      : freeWatchRunning()
+        ? `${formatClock(freeWatchElapsed(stamp))} · Stopwatch · Daybook`
+        : "Daybook";
     if (document.title !== nextTitle) document.title = nextTitle;
     paintBars(stamp);
     paintGoals(stamp);
@@ -1158,6 +1252,8 @@
     else if (action === "delete") deleteTask(id);
     else if (action === "signup") openSignup();
     else if (action === "signout") signOut();
+    else if (action === "watch-start") startFreeWatch();
+    else if (action === "watch-end") endFreeWatch();
   }
 
   function loadProfile() {
@@ -1265,6 +1361,7 @@
 
   function init() {
     state = loadState();
+    loadFreeWatch();
     if (enforceSingleRunner(state.days)) save();
     rememberGoalStart();
     settleGoalDays();

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:wght@500;600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
   <div class="page">
@@ -28,6 +28,19 @@
         </div>
       </div>
     </header>
+
+    <nav class="section-nav" aria-label="Sections">
+      <label for="section-menu">Sections</label>
+      <select id="section-menu">
+        <option value="list">To-do list</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="tomorrow">Tomorrow</option>
+        <option value="day-cards">Yesterday, today, tomorrow</option>
+        <option value="stopwatch">Stopwatch</option>
+        <option value="history-panel">Day to day</option>
+        <option value="flow-panel">Flow chart</option>
+      </select>
+    </nav>
 
     <dialog id="signup" class="signup">
       <form id="signup-form">
@@ -51,7 +64,7 @@
     </dialog>
 
     <main class="workspace">
-      <section class="panel list-panel" aria-labelledby="list-title">
+      <section class="panel list-panel" id="list" aria-labelledby="list-title">
         <div class="panel-head">
           <div>
             <h2 id="list-title">Today</h2>
@@ -80,13 +93,13 @@
           <p class="empty">Loading the stopwatch…</p>
         </section>
 
-        <section class="panel" aria-labelledby="history-title">
+        <section class="panel" id="history-panel" aria-labelledby="history-title">
           <h2 id="history-title">Day to day</h2>
           <p class="quiet intro">Hours for the last seven days.</p>
           <div id="history"></div>
         </section>
 
-        <section class="panel flow-panel" aria-labelledby="flow-title">
+        <section class="panel flow-panel" id="flow-panel" aria-labelledby="flow-title">
           <h2 id="flow-title">Flow chart</h2>
           <p class="quiet intro">The order you worked, with the time on each step.</p>
           <div id="flow"></div>
@@ -104,6 +117,6 @@
   </div>
   <p id="live" class="sr-only" aria-live="polite"></p>
   <noscript>Daybook needs JavaScript to keep your list and your timer.</noscript>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

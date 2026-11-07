@@ -81,8 +81,8 @@ button {
 
 .page {
   width: 100%;
-  max-width: none;
-  margin: 0;
+  max-width: 1280px;
+  margin: 0 auto;
   padding: 16px 20px 28px;
 }
 
@@ -633,7 +633,7 @@ header {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1.75fr) minmax(280px, 0.72fr);
   gap: 14px;
   align-items: start;
 }

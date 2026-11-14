@@ -1,56 +1,87 @@
 # Daybook
 
-A daily to-do list that keeps the time you spend on each task.
+A calm, personal daily to-do site for **Abdu Naim**.
 
-Live site: [https://naimworld77.github.io/daybook/](https://naimworld77.github.io/daybook/)
+- **Live site:** https://naimworld77.github.io/daybook/
+- **GitHub:** https://github.com/NaimWorld77/daybook
+
+Daybook is a static site with no build step, no server account, and no backend. The list, timers, daily goal, and profile stay in this browser only.
 
 ## What it does
 
-- The to-do list is the main panel. Add a task, then work through the list.
-- A task that is not finished is **red**.
-- Press the circle when you finish it. The row turns **green** and shows a tick.
-- Press **Start** on the stopwatch to time something without a task. **End** stops that clock. That time stays on the stopwatch and is not added to a task.
-- Press **Start** on a task when the time should count on that task. The stopwatch then follows the task until you pause or mark it done.
-- Only one task runs at a time. Starting another task pauses the one that was running.
-- **Yesterday**, **today**, and **tomorrow** are the smaller cards. Click one to see that day’s list.
-- The flow chart lines the tasks up in the order you worked them, with the time on each step.
-- **Day to day** shows the hours for the last seven days, plus the total of every day you have recorded.
-- **Daily goal** is the hours you want to work each day, starting on the day you set it. Earlier days say **Didn't add a goal**. From that day on, a day gets a green tick when you reach it, and stays red when you do not. After midnight, today becomes yesterday and keeps that result. The new day starts its own count.
+### The list
 
-## How to use it
+Add tasks with the text field above the list. Tasks show **Start** when pending, **Resume** and **Done** when paused, and **Pause** and **Done** while running. A running task shows a live clock.
 
-1. Open the [live site](https://naimworld77.github.io/daybook/).
-2. Type a task and press **Add**.
-3. Press **Start** when you begin.
-4. Press **Pause** if you stop in the middle. **Resume** continues from the same time.
-5. Press the circle, or **Done**, when the task is finished.
+The blue checkbox marks a task done. Press the green tick again to reopen it. A task that was never started reopens as pending; a task with recorded time reopens as paused. Deleting is a two-step action: **Delete**, then **Remove?**. Click a task title to rename it in place. Done tasks keep a line such as `Started at 9:24 AM · Done at 9:42 AM`.
 
-Tasks you do not finish move to the next day. Finished tasks stay on the day you completed them.
+Only one task can run at a time. Starting another pauses the first. A running timer survives a refresh because the start time is stored as an absolute timestamp.
 
-Your list stays in this browser on this computer. It is still there after you close the page. Clearing the site’s data in the browser clears the days. The tasks are not stored in this GitHub repository.
+### The stopwatch
 
-You can send the live link to a friend. They get their own list. Press **Sign up** and the top corner shows the name, email, and picture entered on that computer. A friend who signs up on their computer sees their own name, not yours.
+When a task is running, the stopwatch shows that task with **Pause** and **Mark done**. When no task is running, it is a stopwatch on its own with **Start** and **End**. Starting a task freezes the stopwatch-only timer. Stopwatch-only time is never added to a task, to today, or to the daily goal.
 
-## Run it on your computer
+### Days
 
-The site is one HTML page, a stylesheet, and a script. No build step is required.
+The three cards open **Yesterday**, **Today**, or **Tomorrow**. The large panel shows the selected list, and **Back to today** appears when another day is open. On load and at midnight, unfinished tasks from earlier days move onto today. A running task is paused before it moves, and its recorded time moves with it. Done tasks stay on the day they were finished, and tomorrow's planned tasks stay on tomorrow.
 
-From this folder:
+### The daily goal
 
-```powershell
-py -3 -m http.server 8765
+Set one goal from 1 minute to 24 hours. The start date is the local day you set it; changing the hours later keeps that original start date. Days before the start date say “Didn't add a goal” and show no tick or red mark.
+
+From the start date onward, each day is compared with the goal:
+
+- Met: green card, green tick, **Goal completed**
+- Short: red card, red cross, **Goal not completed**
+
+Today updates live while a timer runs and turns green the moment the total crosses the goal. At midnight, the finished day is frozen with its total, the goal then in force, whether it was met, and how much of each task counted that day. Frozen days keep their mark. Time already counted on a finished day does not count again on the new day, while the task clock still shows the full time worked.
+
+The last seven days appear today first.
+
+### The charts
+
+**Day to day** shows the last seven days with the week total and the total across all recorded days. Today's bar is blue, other bars are light blue, and empty days are gray.
+
+**Flow chart** shows the tasks of the selected day in created order: a start node, each task step with its time and status, and a total node.
+
+### Local profile
+
+The optional profile stores a name, email, and an optional picture only in this browser. A picture is resized to a 96px JPEG. Signing out removes only the profile; it keeps the tasks. There is no password, no shared account, and no sync to another computer.
+
+A friend who opens the same link gets an empty list and their own local sign-up.
+
+## Files
+
+- `index.html` — page shell
+- `styles.css` — layout and visual design
+- `app.js` — all behavior in one IIFE, no framework
+- `favicon.svg` — green tick in a rounded square
+- `Daybook.ps1` — opens the live site in an Edge or Chrome app window
+- `Daybook.vbs` — launches the PowerShell script with no console
+- `.nojekyll` — tells GitHub Pages to serve the folder as-is
+
+## Desktop window
+
+`Daybook.vbs` runs `Daybook.ps1` hidden. The script opens Edge if it is installed, otherwise Chrome, using `--app` with:
+
+`https://naimworld77.github.io/daybook/?app=<unix seconds>`
+
+The changing query makes each launch load the current live page instead of an old saved copy. The window is 1480 by 920 and uses the normal browser storage for the site. No separate browser profile is created.
+
+A Windows shortcut can run:
+
+```text
+wscript //B "d:\Personal_website\Daybook.vbs"
 ```
 
-Then open [http://127.0.0.1:8765/](http://127.0.0.1:8765/).
+## Data and privacy
 
-On Windows, `Daybook.vbs` opens the live site in its own window. A desktop shortcut can point at that file.
+Everything is stored in `localStorage` in this browser. Dates are local `YYYY-MM-DD` values. There is no server account and no sync across computers.
 
-## Project files
+- `daybook.v1` — days and tasks
+- `daybook.profile.v1` — local profile
+- `daybook.goal.v1` — daily goal
+- `daybook.goal.results.v1` — frozen finished-day results
+- `daybook.watch.v1` — the stopwatch on its own
 
-| File | Purpose |
-| --- | --- |
-| `index.html` | The page |
-| `styles.css` | Layout and the red and green task colors |
-| `app.js` | The list, timer, flow chart, and saved days |
-| `Daybook.ps1` | Opens the live site in an app window |
-| `Daybook.vbs` | Starts that window without a console |
+To publish, update the `?v=` query on `styles.css` and `app.js` when those files change so the browser does not keep an old copy. GitHub Pages serves the `main` branch from the repository root.

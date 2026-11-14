@@ -1,1433 +1,1699 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "daybook.v1";
-  const PROFILE_KEY = "daybook.profile.v1";
-  const GOAL_KEY = "daybook.goal.v1";
-  const GOAL_RESULTS_KEY = "daybook.goal.results.v1";
-  const WATCH_KEY = "daybook.watch.v1";
+  const KEYS = {
+    data: "daybook.v1",
+    profile: "daybook.profile.v1",
+    goal: "daybook.goal.v1",
+    results: "daybook.goal.results.v1",
+    watch: "daybook.watch.v1"
+  };
 
-  let state = { days: {}, selected: "" };
-  let confirmDelete = null;
-  let confirmTimer = 0;
-  let knownToday = "";
-  let freeWatch = { accumulatedMs: 0, startedAt: null };
+  const TICK_MS = 250;
+  const MINUTE = 60 * 1000;
+  const HOUR = 60 * MINUTE;
+  const MAX_TITLE = 140;
+  const VALID_STATUSES = new Set(["pending", "running", "paused", "done"]);
+  const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
-  function el(tag, attrs = {}, children = []) {
-    const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(attrs)) {
-      if (value == null || value === false) continue;
-      if (key === "class") node.className = value;
-      else if (key === "text") node.textContent = String(value);
-      else node.setAttribute(key, value === true ? "" : String(value));
-    }
-    const list = Array.isArray(children) ? children : [children];
-    for (const child of list) {
-      if (child == null || child === false) continue;
-      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
-    }
-    return node;
+  const state = {
+    data: { version: 1, days: {} },
+    profile: null,
+    goal: null,
+    results: {},
+    watch: { accumulatedMs: 0, startedAt: null },
+    todayKey: "",
+    selectedDay: "",
+    editingTaskId: null,
+    editingDayKey: null,
+    deleteConfirmId: null,
+    deleteConfirmTimer: null,
+    notice: null,
+    noticeTimer: null,
+    lastChartSecond: 0,
+    profilePictureDraft: ""
+  };
+
+  let els = {};
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
   }
 
-  function setText(node, text) {
-    if (node && node.textContent !== text) node.textContent = text;
+  function init() {
+    cacheElements();
+    loadState();
+
+    state.todayKey = ymd(new Date());
+    state.selectedDay = state.todayKey;
+
+    bindEvents();
+    handleDayChange(state.todayKey, { announce: true, initial: true });
+
+    renderAll();
+    updateClock(Date.now());
+    document.getElementById("announce").textContent = "";
+
+    state.lastChartSecond = Math.floor(Date.now() / 1000);
+    window.setInterval(tick, TICK_MS);
   }
 
-  function uid() {
-    if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  }
-
-  function pad(n) {
-    return String(n).padStart(2, "0");
-  }
-
-  function todayKey(now = new Date()) {
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  }
-
-  function parseKey(key) {
-    const [year, month, day] = key.split("-").map(Number);
-    return new Date(year, month - 1, day);
-  }
-
-  function addDays(key, amount) {
-    const date = parseKey(key);
-    date.setDate(date.getDate() + amount);
-    return todayKey(date);
-  }
-
-  function dayRelation(key) {
-    const today = todayKey();
-    if (key === today) return "Today";
-    if (key === addDays(today, -1)) return "Yesterday";
-    if (key === addDays(today, 1)) return "Tomorrow";
-    return "";
-  }
-
-  function formatDay(key) {
-    return parseKey(key).toLocaleDateString(undefined, {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    });
-  }
-
-  function formatCardDate(key) {
-    return parseKey(key).toLocaleDateString(undefined, {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-    });
-  }
-
-  function clockTime(stamp) {
-    return new Date(stamp).toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-  function lastNDays(count) {
-    const end = todayKey();
-    const keys = [];
-    for (let i = count - 1; i >= 0; i -= 1) keys.push(addDays(end, -i));
-    return keys;
-  }
-
-  function announce(message) {
-    setText(document.getElementById("live"), message);
-  }
-
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { days: {} };
-      const data = JSON.parse(raw);
-      if (!data || typeof data.days !== "object" || !data.days) return { days: {} };
-      const days = {};
-      for (const [key, day] of Object.entries(data.days)) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || !day || !Array.isArray(day.tasks)) continue;
-        const tasks = day.tasks.map(normalizeTask).filter(Boolean);
-        if (tasks.length) days[key] = { tasks };
-      }
-      return { days };
-    } catch {
-      return { days: {} };
-    }
-  }
-
-  function normalizeTask(task) {
-    if (!task || typeof task !== "object") return null;
-    const allowed = ["pending", "running", "paused", "done"];
-    let status = allowed.includes(task.status) ? task.status : "pending";
-    const startedAt = Number(task.startedAt) || null;
-    if (status === "running" && !startedAt) status = "paused";
-    const title = String(task.title || "Untitled").trim().slice(0, 140) || "Untitled";
-    return {
-      id: String(task.id || uid()),
-      title,
-      status,
-      accumulatedMs: Math.max(0, Number(task.accumulatedMs) || 0),
-      startedAt: status === "running" ? startedAt : null,
-      firstStartedAt: Number(task.firstStartedAt) || null,
-      completedAt: Number(task.completedAt) || null,
-      createdAt: Number(task.createdAt) || Date.now(),
+  function cacheElements() {
+    els = {
+      clockTime: document.getElementById("clockTime"),
+      clockDate: document.getElementById("clockDate"),
+      profileArea: document.getElementById("profileArea"),
+      sectionMenu: document.getElementById("sectionMenu"),
+      dayCards: document.getElementById("dayCards"),
+      backToday: document.getElementById("backToday"),
+      selectedTitle: document.getElementById("selectedTitle"),
+      selectedMeta: document.getElementById("selectedMeta"),
+      moveNotice: document.getElementById("moveNotice"),
+      addForm: document.getElementById("addForm"),
+      taskInput: document.getElementById("taskInput"),
+      taskList: document.getElementById("taskList"),
+      emptyState: document.getElementById("emptyState"),
+      announce: document.getElementById("announce"),
+      stopwatch: document.getElementById("stopwatch"),
+      stopwatchMode: document.getElementById("stopwatchMode"),
+      stopwatchTime: document.getElementById("stopwatchTime"),
+      stopwatchTask: document.getElementById("stopwatchTask"),
+      stopwatchActions: document.getElementById("stopwatchActions"),
+      stopwatchToday: document.getElementById("stopwatchToday"),
+      goalForm: document.getElementById("goalForm"),
+      goalHours: document.getElementById("goalHours"),
+      goalMinutes: document.getElementById("goalMinutes"),
+      goalError: document.getElementById("goalError"),
+      goalSince: document.getElementById("goalSince"),
+      goalStatus: document.getElementById("goalStatus"),
+      goalHistory: document.getElementById("goalHistory"),
+      weekTotal: document.getElementById("weekTotal"),
+      allRecorded: document.getElementById("allRecorded"),
+      weekChart: document.getElementById("weekChart"),
+      flowMeta: document.getElementById("flowMeta"),
+      flowChart: document.getElementById("flowChart"),
+      profileDialog: document.getElementById("profileDialog"),
+      profileForm: document.getElementById("profileForm"),
+      profileDialogTitle: document.getElementById("profileDialogTitle"),
+      profileName: document.getElementById("profileName"),
+      profileEmail: document.getElementById("profileEmail"),
+      profilePicture: document.getElementById("profilePicture"),
+      profilePreview: document.getElementById("profilePreview"),
+      profileError: document.getElementById("profileError")
     };
   }
 
-  function enforceSingleRunner(days) {
+  function loadState() {
+    state.data = normalizeData(readJSON(KEYS.data, null));
+    state.profile = normalizeProfile(readJSON(KEYS.profile, null));
+    state.goal = normalizeGoal(readJSON(KEYS.goal, null));
+    state.results = normalizeResults(readJSON(KEYS.results, null));
+    state.watch = normalizeWatch(readJSON(KEYS.watch, null));
+    state.profilePictureDraft = state.profile ? state.profile.picture || "" : "";
+  }
+
+  function readJSON(key, fallback) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch (error) {
+      console.warn("Daybook could not read local storage.", error);
+      return fallback;
+    }
+  }
+
+  function writeJSON(key, value) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      console.warn("Daybook could not save local storage.", error);
+      return false;
+    }
+  }
+
+  function removeStored(key) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch (error) {
+      console.warn("Daybook could not clear local storage.", error);
+    }
+  }
+
+  function persistData() {
+    writeJSON(KEYS.data, state.data);
+  }
+
+  function persistGoal() {
+    writeJSON(KEYS.goal, state.goal);
+  }
+
+  function persistResults() {
+    writeJSON(KEYS.results, state.results);
+  }
+
+  function persistWatch() {
+    writeJSON(KEYS.watch, state.watch);
+  }
+
+  function normalizeData(raw) {
+    const data = { version: 1, days: {} };
+    if (!raw || typeof raw !== "object" || !raw.days || typeof raw.days !== "object") {
+      return data;
+    }
+
+    for (const [key, day] of Object.entries(raw.days)) {
+      if (!isDayKey(key) || !day || !Array.isArray(day.tasks)) continue;
+      const tasks = day.tasks
+        .map(normalizeTask)
+        .filter(Boolean)
+        .sort(compareTasks);
+
+      if (tasks.length) {
+        data.days[key] = { tasks };
+      }
+    }
+
     const running = [];
-    for (const day of Object.values(days)) {
+    for (const day of Object.values(data.days)) {
       for (const task of day.tasks) {
         if (task.status === "running") running.push(task);
       }
     }
-    if (running.length <= 1) return false;
-    running.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-    const now = Date.now();
-    for (const task of running.slice(1)) {
-      task.accumulatedMs += Math.max(0, now - (task.startedAt || now));
-      task.startedAt = null;
-      task.status = "paused";
-    }
-    return true;
-  }
 
-  function save() {
-    const days = {};
-    for (const [key, day] of Object.entries(state.days)) {
-      if (day.tasks && day.tasks.length) days[key] = day;
-    }
-    const note = document.getElementById("save-note");
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, days }));
-      if (note) note.textContent = "Saved in this browser, on this computer.";
-    } catch {
-      if (note) note.textContent = "This browser blocked saving, so the list lasts until you close the page.";
-    }
-  }
-
-  function dayTasks(key) {
-    return (state.days[key] && state.days[key].tasks) || [];
-  }
-
-  function ensureDay(key) {
-    if (!state.days[key]) state.days[key] = { tasks: [] };
-    return state.days[key];
-  }
-
-  function rollUnfinished(now = new Date()) {
-    const today = todayKey(now);
-    const stamp = now.getTime();
-    const keys = Object.keys(state.days).filter((key) => key < today).sort();
-    const carried = [];
-    for (const key of keys) {
-      const day = state.days[key];
-      if (!day || !Array.isArray(day.tasks)) continue;
-      const staying = [];
-      for (const task of day.tasks) {
-        if (task.status === "done") {
-          staying.push(task);
-          continue;
-        }
-        if (task.status === "running") {
-          task.accumulatedMs = elapsed(task, stamp);
-          task.startedAt = null;
-          task.status = "paused";
-        }
-        carried.push(task);
+    if (running.length > 1) {
+      running.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+      for (let index = 1; index < running.length; index += 1) {
+        const task = running[index];
+        task.accumulatedMs = Math.round(taskElapsed(task));
+        task.startedAt = null;
+        task.status = "paused";
       }
-      if (staying.length) day.tasks = staying;
-      else delete state.days[key];
     }
-    if (!carried.length) return 0;
-    const day = ensureDay(today);
-    day.tasks = carried.concat(day.tasks);
-    save();
-    return carried.length;
+
+    return data;
   }
 
-  function findTask(id) {
-    for (const [key, day] of Object.entries(state.days)) {
-      const task = day.tasks.find((item) => item.id === id);
-      if (task) return { key, day, task };
+  function normalizeTask(raw) {
+    if (!raw || typeof raw !== "object") return null;
+
+    const status = VALID_STATUSES.has(raw.status) ? raw.status : "pending";
+    let startedAt = Number.isFinite(raw.startedAt) ? raw.startedAt : null;
+    let firstStartedAt = Number.isFinite(raw.firstStartedAt) ? raw.firstStartedAt : null;
+    let completedAt = Number.isFinite(raw.completedAt) ? raw.completedAt : null;
+    const accumulatedMs = Math.max(0, Math.round(Number(raw.accumulatedMs) || 0));
+    const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now();
+    const title = String(raw.title == null ? "" : raw.title).trim().slice(0, MAX_TITLE) || "Untitled";
+    const id = String(raw.id || makeId());
+
+    if (status === "running" && startedAt == null) {
+      return {
+        id,
+        title,
+        status: accumulatedMs > 0 || firstStartedAt ? "paused" : "pending",
+        accumulatedMs,
+        startedAt: null,
+        firstStartedAt,
+        completedAt: status === "done" ? completedAt : null,
+        createdAt
+      };
     }
-    return null;
-  }
 
-  function runningTask() {
-    for (const [key, day] of Object.entries(state.days)) {
-      const task = day.tasks.find((item) => item.status === "running");
-      if (task) return { key, day, task };
-    }
-    return null;
-  }
+    if (status !== "running") startedAt = null;
+    if (status !== "done") completedAt = null;
 
-  function elapsed(task, now = Date.now()) {
-    const base = Math.max(0, Number(task.accumulatedMs) || 0);
-    if (task.status === "running" && task.startedAt) {
-      return base + Math.max(0, now - task.startedAt);
-    }
-    return base;
-  }
-
-  function dayTotal(key, now = Date.now()) {
-    return dayTasks(key).reduce((sum, task) => sum + elapsed(task, now), 0);
-  }
-
-  function allTotal(now = Date.now()) {
-    return Object.keys(state.days).reduce((sum, key) => sum + dayTotal(key, now), 0);
-  }
-
-  function weekTotal(now = Date.now()) {
-    return lastNDays(7).reduce((sum, key) => sum + dayTotal(key, now), 0);
-  }
-
-  function totalFor(token, now = Date.now()) {
-    if (token === "__all__") return allTotal(now);
-    if (token === "__today__") return dayTotal(todayKey(new Date(now)), now);
-    if (token === "__week__") return weekTotal(now);
-    if (token === "__selected__") return dayTotal(state.selected, now);
-    return dayTotal(token, now);
-  }
-
-  function liveFor(token) {
-    const running = runningTask();
-    if (!running) return false;
-    if (token === "__all__") return true;
-    if (token === "__today__") return running.key === todayKey();
-    if (token === "__week__") return lastNDays(7).includes(running.key);
-    if (token === "__selected__") return running.key === state.selected;
-    return running.key === token;
-  }
-
-  function parts(ms) {
-    const total = Math.max(0, Math.floor(ms / 1000));
     return {
-      h: Math.floor(total / 3600),
-      m: Math.floor((total % 3600) / 60),
-      s: total % 60,
+      id,
+      title,
+      status,
+      accumulatedMs,
+      startedAt,
+      firstStartedAt,
+      completedAt,
+      createdAt
     };
   }
 
-  function formatClock(ms) {
-    const { h, m, s } = parts(ms);
-    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  function normalizeProfile(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const name = String(raw.name == null ? "" : raw.name).trim().slice(0, 80);
+    const email = String(raw.email == null ? "" : raw.email).trim().slice(0, 120);
+    const picture = typeof raw.picture === "string" && raw.picture.indexOf("data:image/jpeg") === 0
+      ? raw.picture
+      : "";
+    if (!name && !email && !picture) return null;
+    return { name, email, picture };
   }
 
-  function formatCompact(ms, live) {
-    const { h, m, s } = parts(ms);
-    if (h > 0) return live ? `${h}h ${pad(m)}m ${pad(s)}s` : `${h}h ${pad(m)}m`;
-    if (m > 0) return live || s ? `${m}m ${pad(s)}s` : `${m}m`;
-    if (s > 0 || live) return `${s}s`;
-    return "0m";
+  function normalizeGoal(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const ms = Math.round(Number(raw.ms));
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    const since = isDayKey(raw.since) ? raw.since : ymd(new Date());
+    return { ms: Math.min(ms, 24 * HOUR), since };
   }
 
-  function plural(count, word) {
-    return `${count} ${word}${count === 1 ? "" : "s"}`;
+  function normalizeResults(raw) {
+    const results = {};
+    if (!raw || typeof raw !== "object") return results;
+
+    for (const [key, result] of Object.entries(raw)) {
+      if (!isDayKey(key) || !result || typeof result !== "object") continue;
+      const counted = {};
+      if (result.counted && typeof result.counted === "object") {
+        for (const [taskId, ms] of Object.entries(result.counted)) {
+          counted[taskId] = Math.max(0, Math.round(Number(ms) || 0));
+        }
+      }
+      results[key] = {
+        totalMs: Math.max(0, Math.round(Number(result.totalMs) || 0)),
+        goalMs: Math.max(0, Math.round(Number(result.goalMs) || 0)),
+        met: typeof result.met === "boolean" ? result.met : null,
+        counted
+      };
+    }
+
+    return results;
   }
 
-  function formatWords(ms, live) {
-    const { h, m, s } = parts(ms);
-    if (h === 0 && m === 0 && s === 0) return live ? "0 seconds" : "0 minutes";
-    const bits = [];
-    if (h) bits.push(plural(h, "hour"));
-    if (m) bits.push(plural(m, "minute"));
-    if (s && (live || h === 0)) bits.push(plural(s, "second"));
-    return bits.join(" ") || "0 minutes";
+  function normalizeWatch(raw) {
+    if (!raw || typeof raw !== "object") {
+      return { accumulatedMs: 0, startedAt: null };
+    }
+    return {
+      accumulatedMs: Math.max(0, Math.round(Number(raw.accumulatedMs) || 0)),
+      startedAt: Number.isFinite(raw.startedAt) ? raw.startedAt : null
+    };
   }
 
-  function textFor(format, ms, live) {
-    if (format === "clock") return formatClock(ms);
-    if (format === "words") return formatWords(ms, live);
-    return formatCompact(ms, live);
+  function bindEvents() {
+    els.addForm.addEventListener("submit", addTaskFromInput);
+    els.goalForm.addEventListener("submit", saveGoalFromForm);
+    els.sectionMenu.addEventListener("change", handleSectionMenu);
+    els.backToday.addEventListener("click", () => selectDay(state.todayKey, true));
+
+    document.addEventListener("click", handleDelegatedClick);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) tick();
+    });
+    window.addEventListener("focus", tick);
+    window.addEventListener("pageshow", tick);
+
+    els.profileForm.addEventListener("submit", saveProfileFromForm);
+    els.profileName.addEventListener("input", renderProfilePreview);
+    els.profilePicture.addEventListener("change", handleProfilePicture);
+    els.profileDialog.addEventListener("click", (event) => {
+      if (event.target === els.profileDialog) els.profileDialog.close();
+    });
   }
 
-  function clearArmedDelete() {
-    confirmDelete = null;
-    clearTimeout(confirmTimer);
+  function handleDelegatedClick(event) {
+    const target = event.target.closest("[data-action]");
+    if (!target) return;
+
+    const action = target.dataset.action;
+    const dayKey = target.dataset.day || "";
+    const taskId = target.dataset.taskId || "";
+
+    switch (action) {
+      case "open-profile":
+        event.preventDefault();
+        openProfileDialog();
+        break;
+      case "close-profile":
+        event.preventDefault();
+        els.profileDialog.close();
+        break;
+      case "signout":
+        event.preventDefault();
+        signOut();
+        break;
+      case "select-day":
+        selectDay(dayKey, false);
+        break;
+      case "rename-task":
+        beginRename(dayKey, taskId);
+        break;
+      case "toggle-done":
+        toggleTaskDone(dayKey, taskId);
+        break;
+      case "start-task":
+        startTask(dayKey, taskId);
+        break;
+      case "pause-task":
+        pauseTask(dayKey, taskId);
+        break;
+      case "done-task":
+        markTaskDone(dayKey, taskId);
+        break;
+      case "delete-task":
+        requestDeleteTask(dayKey, taskId);
+        break;
+      case "watch-start":
+        startAloneWatch();
+        break;
+      case "watch-end":
+        endAloneWatch();
+        break;
+      default:
+        break;
+    }
   }
 
-  function taskButton(action, id) {
-    const safe = window.CSS && CSS.escape ? CSS.escape(id) : id;
-    return document.querySelector(`[data-action="${action}"][data-id="${safe}"]`);
-  }
-
-  function refreshDeleteButton(id) {
-    const button = taskButton("delete", id);
-    if (!button) return;
-    const armed = confirmDelete === id;
-    button.textContent = armed ? "Remove?" : "Delete";
-    button.classList.toggle("danger", armed);
-  }
-
-  function armDelete(id) {
-    const previous = confirmDelete;
-    confirmDelete = id;
-    clearTimeout(confirmTimer);
-    if (previous && previous !== id) refreshDeleteButton(previous);
-    refreshDeleteButton(id);
-    confirmTimer = setTimeout(() => {
-      const armed = confirmDelete;
-      confirmDelete = null;
-      if (armed) refreshDeleteButton(armed);
-    }, 2200);
-  }
-
-  function displayTitle(task) {
-    return task.title.trim() || "Untitled";
-  }
-
-  function syncTitleDisplays(task) {
-    const label = displayTitle(task);
-    const safe = window.CSS && CSS.escape ? CSS.escape(task.id) : task.id;
-    document.querySelectorAll(`[data-title-for="${safe}"]`).forEach((node) => setText(node, label));
-  }
-
-  function goToSection(value) {
+  function handleSectionMenu() {
+    const value = els.sectionMenu.value;
+    els.sectionMenu.value = "";
     if (!value) return;
-    if (value === "yesterday") selectDay(addDays(todayKey(), -1));
-    else if (value === "tomorrow") selectDay(addDays(todayKey(), 1));
-    else if (value === "list") selectDay(todayKey());
-    const target = document.getElementById(value === "yesterday" || value === "tomorrow" ? "list" : value);
-    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    if (value === "list") {
+      selectDay(state.todayKey, false);
+      scrollToSection("list");
+      return;
+    }
+
+    if (value === "day:yesterday") {
+      selectDay(addDaysKey(state.todayKey, -1), false);
+      scrollToSection("list");
+      return;
+    }
+
+    if (value === "day:tomorrow") {
+      selectDay(addDaysKey(state.todayKey, 1), false);
+      scrollToSection("list");
+      return;
+    }
+
+    scrollToSection(value);
   }
 
-  function selectDay(key) {
-    if (!key) return;
-    clearArmedDelete();
-    state.selected = key;
+  function scrollToSection(id) {
+    const section = document.getElementById(id);
+    if (!section) return;
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function selectDay(dayKey, scroll) {
+    if (!isDayKey(dayKey)) return;
+    state.selectedDay = dayKey;
+    state.editingTaskId = null;
+    state.editingDayKey = null;
+    clearDeleteConfirmation();
+    renderAll();
+    if (scroll) scrollToSection("list");
+  }
+
+  function tick() {
+    const now = Date.now();
+    const currentToday = ymd(new Date(now));
+
+    if (currentToday !== state.todayKey) {
+      handleDayChange(currentToday, { announce: true });
+      state.lastChartSecond = 0;
+      renderAll();
+    } else {
+      updateClock(now);
+    }
+
+    updateLiveTaskTimes(now);
+    updateStopwatchLive(now);
+    updateListMeta(now);
+    renderGoal(now);
+    updateTabTitle(now);
+
+    const second = Math.floor(now / 1000);
+    if (second !== state.lastChartSecond) {
+      state.lastChartSecond = second;
+      renderCharts(now);
+    }
+  }
+
+  function handleDayChange(newToday, options) {
+    const opts = options || {};
+    const previousToday = state.todayKey;
+    const now = Date.now();
+
+    state.todayKey = newToday;
+    const settled = settleFinishedDays(newToday, now);
+    const moved = moveUnfinishedToToday(newToday, now);
+
+    if (!state.selectedDay || state.selectedDay === previousToday) {
+      state.selectedDay = newToday;
+    } else if (state.selectedDay < addDaysKey(newToday, -1)) {
+      state.selectedDay = newToday;
+    }
+
+    persistData();
+    if (settled) persistResults();
+    if (moved > 0) showMoveNotice(moved);
+
+    if (opts.initial && !state.selectedDay) state.selectedDay = newToday;
+    return moved;
+  }
+
+  function settleFinishedDays(todayKey, now) {
+    const keys = new Set();
+
+    for (const key of Object.keys(state.data.days)) {
+      if (key < todayKey) keys.add(key);
+    }
+
+    if (goalExists()) {
+      let cursor = goalSince();
+      const recentFloor = addDaysKey(todayKey, -31);
+      if (cursor < recentFloor) cursor = recentFloor;
+      let guard = 0;
+      while (cursor < todayKey && guard < 400) {
+        keys.add(cursor);
+        cursor = addDaysKey(cursor, 1);
+        guard += 1;
+      }
+    }
+
+    const ordered = Array.from(keys).sort();
+    let changed = false;
+
+    for (const key of ordered) {
+      if (state.results[key]) continue;
+      state.results[key] = freezeDay(key, now);
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  function freezeDay(dayKey, now) {
+    const tasks = getDayTasks(dayKey).slice();
+    const boundary = Math.min(dayEndMs(dayKey), now);
+    const counted = {};
+    let total = 0;
+
+    for (const task of tasks) {
+      const ms = countedTaskThrough(task, dayKey, boundary);
+      counted[task.id] = ms;
+      total += ms;
+    }
+
+    const goal = goalForDay(dayKey);
+    return {
+      totalMs: Math.round(total),
+      goalMs: goal,
+      met: goal > 0 ? total >= goal : null,
+      counted
+    };
+  }
+
+  function countedTaskThrough(task, dayKey, boundary) {
+    let elapsedAtBoundary = Math.max(0, Math.round(Number(task.accumulatedMs) || 0));
+
+    if (task.status === "running" && Number.isFinite(task.startedAt) && task.startedAt < boundary) {
+      elapsedAtBoundary += Math.max(0, Math.round(boundary - task.startedAt));
+    }
+
+    return Math.max(0, Math.round(elapsedAtBoundary - priorCountedForTask(task.id, dayKey)));
+  }
+
+  function moveUnfinishedToToday(todayKey, now) {
+    let moved = 0;
+    const todayDay = ensureDay(todayKey);
+    const pastKeys = Object.keys(state.data.days).filter((key) => key < todayKey).sort();
+
+    for (const key of pastKeys) {
+      const day = state.data.days[key];
+      if (!day || !Array.isArray(day.tasks)) continue;
+
+      const keep = [];
+      for (const task of day.tasks) {
+        if (task.status === "done") {
+          keep.push(task);
+          continue;
+        }
+
+        if (task.status === "running") {
+          stopTaskTimer(task, now);
+        }
+
+        todayDay.tasks.push(task);
+        moved += 1;
+      }
+
+      day.tasks = keep;
+      if (!day.tasks.length) delete state.data.days[key];
+    }
+
+    if (moved > 0) todayDay.tasks.sort(compareTasks);
+    return moved;
+  }
+
+  function showMoveNotice(count) {
+    const text = "Moved " + count + " unfinished task" + (count === 1 ? "" : "s") + " to today.";
+    state.notice = { text, expires: Date.now() + 10000 };
+    els.announce.textContent = "";
+    window.setTimeout(() => {
+      els.announce.textContent = text;
+    }, 20);
+    if (state.noticeTimer) window.clearTimeout(state.noticeTimer);
+    state.noticeTimer = window.setTimeout(() => {
+      state.notice = null;
+      renderNotice();
+    }, 10000);
+    renderNotice();
+  }
+
+  function renderNotice() {
+    if (!state.notice || state.notice.expires < Date.now()) {
+      els.moveNotice.hidden = true;
+      els.moveNotice.textContent = "";
+      return;
+    }
+    els.moveNotice.hidden = false;
+    els.moveNotice.textContent = state.notice.text;
+  }
+
+  function renderAll() {
+    const now = Date.now();
+    renderProfile();
+    renderDays(now);
+    renderListHeader(now);
+    renderNotice();
+    renderTasks(now);
+    renderStopwatch(now);
+    renderGoal(now);
+    syncGoalForm(false);
+    renderCharts(now);
+    updateClock(now);
+    updateTabTitle(now);
+  }
+
+  function renderProfile() {
+    if (!state.profile) {
+      els.profileArea.innerHTML =
+        '<button class="btn btn-ghost btn-small" type="button" data-action="open-profile">Sign in</button>';
+      return;
+    }
+
+    const name = state.profile.name || "Profile";
+    const email = state.profile.email || "";
+    const initial = (name || email || "?").trim().charAt(0).toUpperCase() || "?";
+    const avatar = state.profile.picture
+      ? '<span class="avatar"><img src="' + esc(state.profile.picture) + '" alt=""></span>'
+      : '<span class="avatar">' + esc(initial) + "</span>";
+
+    els.profileArea.innerHTML =
+      '<div class="profile-chip">' +
+        avatar +
+        '<span class="profile-copy">' +
+          '<span class="profile-name">' + esc(name) + "</span>" +
+          '<span class="profile-email">' + esc(email) + "</span>" +
+        "</span>" +
+        '<button class="signout" type="button" data-action="signout">Sign out</button>' +
+      "</div>";
+  }
+
+  function openProfileDialog() {
+    const profile = state.profile;
+    els.profileName.value = profile ? profile.name || "" : "";
+    els.profileEmail.value = profile ? profile.email || "" : "";
+    state.profilePictureDraft = profile ? profile.picture || "" : "";
+    els.profilePicture.value = "";
+    hideProfileError();
+
+    els.profileDialogTitle.textContent = profile ? "Edit your profile" : "Create your profile";
+    const submit = els.profileForm.querySelector('button[type="submit"]');
+    if (submit) submit.textContent = profile ? "Save changes" : "Save profile";
+
+    renderProfilePreview();
+
+    if (!els.profileDialog.open) els.profileDialog.showModal();
+    window.setTimeout(() => els.profileName.focus(), 30);
+  }
+
+  function signOut() {
+    removeStored(KEYS.profile);
+    state.profile = null;
+    state.profilePictureDraft = "";
+    renderProfile();
+    els.announce.textContent = "Signed out. Your tasks are still here.";
+  }
+
+  function renderProfilePreview() {
+    const name = els.profileName.value.trim();
+    if (state.profilePictureDraft) {
+      els.profilePreview.innerHTML = '<img src="' + esc(state.profilePictureDraft) + '" alt="">';
+      return;
+    }
+    els.profilePreview.textContent = (name.charAt(0) || "?").toUpperCase();
+  }
+
+  async function handleProfilePicture() {
+    const file = els.profilePicture.files && els.profilePicture.files[0];
+    if (!file) return;
+
+    if (!file.type || file.type.indexOf("image/") !== 0) {
+      els.profilePicture.value = "";
+      showProfileError("Choose an image file for your picture.");
+      return;
+    }
+
+    try {
+      const jpeg = await resizeImageToJpeg(file, 96);
+      state.profilePictureDraft = jpeg;
+      hideProfileError();
+      renderProfilePreview();
+    } catch (error) {
+      console.warn("Daybook could not resize the picture.", error);
+      els.profilePicture.value = "";
+      showProfileError("That picture could not be read. Try another image.");
+    }
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Could not load image."));
+      image.src = src;
+    });
+  }
+
+  async function resizeImageToJpeg(file, size) {
+    const src = await readFileAsDataUrl(file);
+    const image = await loadImage(src);
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas is unavailable.");
+
+    const scale = Math.max(size / image.width, size / image.height);
+    const width = image.width * scale;
+    const height = image.height * scale;
+    const x = (size - width) / 2;
+    const y = (size - height) / 2;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size, size);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, x, y, width, height);
+    return canvas.toDataURL("image/jpeg", 0.86);
+  }
+
+  function saveProfileFromForm(event) {
+    event.preventDefault();
+    const name = els.profileName.value.trim().slice(0, 80);
+    const email = els.profileEmail.value.trim().slice(0, 120);
+
+    if (!name) {
+      showProfileError("Add your name to create the profile.");
+      els.profileName.focus();
+      return;
+    }
+    if (!isValidEmail(email)) {
+      showProfileError("Add a valid email address.");
+      els.profileEmail.focus();
+      return;
+    }
+
+    state.profile = {
+      name,
+      email,
+      picture: state.profilePictureDraft || ""
+    };
+
+    writeJSON(KEYS.profile, state.profile);
+    hideProfileError();
+    els.profileDialog.close();
+    renderProfile();
+    els.announce.textContent = "Profile saved only in this browser.";
+  }
+
+  function isValidEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  function showProfileError(message) {
+    els.profileError.textContent = message;
+    els.profileError.hidden = false;
+  }
+
+  function hideProfileError() {
+    els.profileError.textContent = "";
+    els.profileError.hidden = true;
+  }
+
+  function renderDays(now) {
+    const cards = [
+      { offset: -1, name: "Yesterday" },
+      { offset: 0, name: "Today" },
+      { offset: 1, name: "Tomorrow" }
+    ];
+
+    els.dayCards.innerHTML = cards.map((card) => {
+      const key = addDaysKey(state.todayKey, card.offset);
+      const tasks = getDayTasks(key);
+      const open = tasks.filter((task) => task.status !== "done").length;
+      const total = dayCountedTotal(key, now);
+      const active = key === state.selectedDay ? " is-active" : "";
+      const meta = tasks.length
+        ? open + " open · " + formatDuration(total)
+        : "No tasks";
+      return (
+        '<button class="day-card' + active + '" type="button" data-action="select-day" data-day="' + esc(key) + '" aria-pressed="' + (active ? "true" : "false") + '">' +
+          '<span class="day-name">' + esc(card.name) + "</span>" +
+          '<span class="day-date">' + esc(formatDateShort(key)) + "</span>" +
+          '<span class="day-meta">' + esc(meta) + "</span>" +
+        "</button>"
+      );
+    }).join("");
+  }
+
+  function renderListHeader(now) {
+    const label = dayLabel(state.selectedDay);
+    els.selectedTitle.textContent = label;
+    els.selectedMeta.textContent = selectedDaySummary(now);
+    els.backToday.hidden = state.selectedDay === state.todayKey;
+    els.taskInput.placeholder = "Add a task for " + label.toLowerCase();
+  }
+
+  function selectedDaySummary(now) {
+    const tasks = getDayTasks(state.selectedDay);
+    if (!tasks.length) return "No tasks yet";
+    const open = tasks.filter((task) => task.status !== "done").length;
+    const total = dayCountedTotal(state.selectedDay, now);
+    return formatFullDate(state.selectedDay) + " · " + tasks.length + " task" +
+      (tasks.length === 1 ? "" : "s") + " · " + open + " open · " + formatDuration(total);
+  }
+
+  function updateListMeta(now) {
+    if (els.selectedMeta) els.selectedMeta.textContent = selectedDaySummary(now);
+  }
+
+  function renderTasks(now) {
+    const tasks = getDayTasks(state.selectedDay).slice().sort(compareTasks);
+    const deleteMissing = state.deleteConfirmId && !tasks.some((task) => task.id === state.deleteConfirmId);
+    if (deleteMissing) clearDeleteConfirmation();
+
+    if (!tasks.length) {
+      els.taskList.innerHTML = "";
+      els.emptyState.hidden = false;
+      return;
+    }
+
+    els.emptyState.hidden = true;
+    els.taskList.innerHTML = tasks.map((task) => taskCardMarkup(task, now)).join("");
+    attachRenameInput();
+  }
+
+  function taskCardMarkup(task, now) {
+    const dayKey = state.selectedDay;
+    const isEditing = state.editingTaskId === task.id && state.editingDayKey === dayKey;
+    const status = task.status;
+    const classes = "task-card" +
+      (status === "running" ? " is-running" : "") +
+      (status === "done" ? " is-done" : "");
+
+    const title = isEditing
+      ? '<input class="rename-input" data-rename-input type="text" maxlength="' + MAX_TITLE +
+        '" value="' + esc(task.title) + '" aria-label="Rename task">'
+      : '<button class="task-title-btn" type="button" data-action="rename-task" data-day="' + esc(dayKey) +
+        '" data-task-id="' + esc(task.id) + '" title="Rename task">' + esc(task.title) + "</button>";
+
+    const checkLabel = status === "done" ? "Reopen task" : "Mark task done";
+    const check =
+      '<button class="task-check" type="button" data-action="toggle-done" data-day="' + esc(dayKey) +
+      '" data-task-id="' + esc(task.id) + '" aria-label="' + checkLabel + '" aria-pressed="' +
+      (status === "done" ? "true" : "false") + '">' +
+        '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5 8 14.5 16 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>' +
+      "</button>";
+
+    let meta = "";
+    if (status === "done") {
+      meta = '<span class="status-pill is-done">Done</span>' +
+        '<span class="done-line">' + esc(doneLine(task)) + "</span>";
+    } else if (status === "pending") {
+      meta = '<span class="status-pill">Pending</span><span class="task-time">Not started</span>';
+    } else {
+      const statusLabel = status === "running" ? "Running" : "Paused";
+      const pillClass = status === "running" ? " is-running" : " is-paused";
+      meta = '<span class="status-pill' + pillClass + '">' + statusLabel + "</span>" +
+        '<span class="task-time" data-elapsed-id="' + esc(task.id) + '">' +
+        esc(clockText(taskElapsed(task, now))) + "</span>";
+    }
+
+    const actions = [];
+    if (status === "pending") {
+      actions.push(taskButton("start-task", dayKey, task.id, "Start", "btn-primary"));
+    } else if (status === "paused") {
+      actions.push(taskButton("start-task", dayKey, task.id, "Resume", "btn-primary"));
+      actions.push(taskButton("done-task", dayKey, task.id, "Done", "btn-green"));
+    } else if (status === "running") {
+      actions.push(taskButton("pause-task", dayKey, task.id, "Pause", "btn-ghost"));
+      actions.push(taskButton("done-task", dayKey, task.id, "Done", "btn-green"));
+    }
+
+    const confirming = state.deleteConfirmId === task.id;
+    actions.push(
+      '<button class="btn btn-small btn-danger' + (confirming ? " is-confirm" : "") +
+      '" type="button" data-action="delete-task" data-day="' + esc(dayKey) +
+      '" data-task-id="' + esc(task.id) + '">' + (confirming ? "Remove?" : "Delete") + "</button>"
+    );
+
+    return (
+      '<li class="' + classes + '">' +
+        check +
+        '<div class="task-body">' +
+          title +
+          '<div class="task-meta">' + meta + "</div>" +
+        "</div>" +
+        '<div class="task-actions">' + actions.join("") + "</div>" +
+      "</li>"
+    );
+  }
+
+  function taskButton(action, dayKey, taskId, label, className) {
+    return '<button class="btn btn-small ' + className + '" type="button" data-action="' + action +
+      '" data-day="' + esc(dayKey) + '" data-task-id="' + esc(taskId) + '">' + label + "</button>";
+  }
+
+  function beginRename(dayKey, taskId) {
+    state.editingTaskId = taskId;
+    state.editingDayKey = dayKey;
+    renderTasks(Date.now());
+  }
+
+  function attachRenameInput() {
+    const input = document.querySelector("[data-rename-input]");
+    if (!input) return;
+
+    let finished = false;
+    input.focus();
+    input.select();
+
+    const finish = (save) => {
+      if (finished) return;
+      finished = true;
+      if (!save) {
+        state.editingTaskId = null;
+        state.editingDayKey = null;
+        renderTasks(Date.now());
+        return;
+      }
+      commitRename(input.value);
+    };
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      if (!finished) finish(true);
+    });
+  }
+
+  function commitRename(value) {
+    const found = findTask(state.editingTaskId, state.editingDayKey);
+    if (found) {
+      const nextTitle = value.trim().slice(0, MAX_TITLE);
+      found.task.title = nextTitle || found.task.title || "Untitled";
+    }
+    state.editingTaskId = null;
+    state.editingDayKey = null;
+    persistData();
     renderAll();
   }
 
-  function addTask() {
-    const input = document.getElementById("task-input");
-    const title = input.value.trim();
+  function addTaskFromInput(event) {
+    event.preventDefault();
+    const title = els.taskInput.value.trim().slice(0, MAX_TITLE);
     if (!title) {
-      input.value = "";
-      input.focus();
+      els.taskInput.focus();
       return;
     }
-    clearArmedDelete();
-    ensureDay(state.selected).tasks.push({
-      id: uid(),
+
+    const day = ensureDay(state.selectedDay);
+    day.tasks.push({
+      id: makeId(),
       title,
       status: "pending",
       accumulatedMs: 0,
       startedAt: null,
       firstStartedAt: null,
       completedAt: null,
-      createdAt: Date.now(),
+      createdAt: Date.now()
     });
-    input.value = "";
-    save();
-    announce(`Added ${title}.`);
+    day.tasks.sort(compareTasks);
+
+    persistData();
+    els.taskInput.value = "";
     renderAll();
-    input.focus();
+    els.taskInput.focus();
   }
 
-  function loadFreeWatch() {
-    try {
-      const data = JSON.parse(localStorage.getItem(WATCH_KEY) || "null");
-      freeWatch = {
-        accumulatedMs: Math.max(0, Number(data && data.accumulatedMs) || 0),
-        startedAt: Number(data && data.startedAt) || null,
-      };
-    } catch {
-      freeWatch = { accumulatedMs: 0, startedAt: null };
-    }
-  }
-
-  function saveFreeWatch() {
-    localStorage.setItem(WATCH_KEY, JSON.stringify(freeWatch));
-  }
-
-  function freeWatchRunning() {
-    return Boolean(freeWatch.startedAt);
-  }
-
-  function freeWatchElapsed(now = Date.now()) {
-    if (!freeWatch.startedAt) return freeWatch.accumulatedMs;
-    return freeWatch.accumulatedMs + Math.max(0, now - freeWatch.startedAt);
-  }
-
-  function freezeFreeWatch() {
-    if (!freeWatch.startedAt) return;
-    freeWatch.accumulatedMs = freeWatchElapsed();
-    freeWatch.startedAt = null;
-    saveFreeWatch();
-  }
-
-  function startFreeWatch() {
-    if (freeWatch.startedAt || runningTask()) return;
-    freeWatch = { accumulatedMs: 0, startedAt: Date.now() };
-    saveFreeWatch();
-    announce("Stopwatch started.");
-    renderAll();
-  }
-
-  function endFreeWatch() {
-    if (!freeWatch.startedAt) return;
-    freezeFreeWatch();
-    announce(`Stopwatch ended at ${formatClock(freeWatch.accumulatedMs)}.`);
-    renderAll();
-  }
-
-  function startTask(id) {
-    const found = findTask(id);
-    if (!found) return;
-    clearArmedDelete();
-    freezeFreeWatch();
-    const now = Date.now();
-    let pausedName = "";
-    for (const day of Object.values(state.days)) {
-      for (const task of day.tasks) {
-        if (task.status === "running" && task.id !== id) {
-          task.accumulatedMs = elapsed(task, now);
-          task.startedAt = null;
-          task.status = "paused";
-          pausedName = displayTitle(task);
-        }
-      }
-    }
-    const task = found.task;
-    if (task.status === "running" || task.status === "done") return;
-    task.completedAt = null;
-    task.status = "running";
-    task.startedAt = now;
-    if (!task.firstStartedAt) task.firstStartedAt = now;
-    save();
-    const name = displayTitle(task);
-    announce(pausedName ? `Paused ${pausedName}. Timing ${name}.` : `Timing ${name}.`);
-    renderAll();
-  }
-
-  function pauseTask(id) {
-    const found = findTask(id);
-    if (!found || found.task.status !== "running") return;
-    clearArmedDelete();
-    const task = found.task;
-    task.accumulatedMs = elapsed(task);
-    task.startedAt = null;
-    task.status = "paused";
-    save();
-    announce(`Paused ${displayTitle(task)} at ${formatClock(task.accumulatedMs)}.`);
-    renderAll();
-  }
-
-  function completeTask(id) {
-    const found = findTask(id);
+  function startTask(dayKey, taskId) {
+    const found = findTask(taskId, dayKey);
     if (!found || found.task.status === "done") return;
-    clearArmedDelete();
-    const task = found.task;
-    if (task.status === "running") {
-      task.accumulatedMs = elapsed(task);
-      task.startedAt = null;
-    }
-    task.status = "done";
-    task.completedAt = Date.now();
-    save();
-    announce(`${displayTitle(task)} checked off. ${formatWords(task.accumulatedMs, true)}.`);
+
+    const now = Date.now();
+    pauseRunningTask(now, found.task.id);
+    freezeAloneWatch(now);
+
+    found.task.status = "running";
+    found.task.startedAt = now;
+    found.task.completedAt = null;
+    if (!found.task.firstStartedAt) found.task.firstStartedAt = now;
+
+    persistData();
+    persistWatch();
     renderAll();
   }
 
-  function reopenTask(id) {
-    const found = findTask(id);
-    if (!found || found.task.status !== "done") return;
-    clearArmedDelete();
-    const task = found.task;
-    task.completedAt = null;
-    task.status = task.accumulatedMs > 0 ? "paused" : "pending";
-    save();
-    announce(`${displayTitle(task)} reopened.`);
+  function pauseTask(dayKey, taskId) {
+    const found = findTask(taskId, dayKey);
+    if (!found || found.task.status !== "running") return;
+    stopTaskTimer(found.task, Date.now());
+    persistData();
     renderAll();
   }
 
-  function toggleTask(id) {
-    const found = findTask(id);
+  function markTaskDone(dayKey, taskId) {
+    const found = findTask(taskId, dayKey);
+    if (!found || found.task.status === "done") return;
+
+    const now = Date.now();
+    stopTaskTimer(found.task, now);
+    found.task.status = "done";
+    found.task.completedAt = now;
+    found.task.startedAt = null;
+
+    persistData();
+    renderAll();
+  }
+
+  function toggleTaskDone(dayKey, taskId) {
+    const found = findTask(taskId, dayKey);
     if (!found) return;
-    if (found.task.status === "done") reopenTask(id);
-    else completeTask(id);
-  }
 
-  function deleteTask(id) {
-    if (confirmDelete !== id) {
-      armDelete(id);
-      return;
-    }
-    clearArmedDelete();
-    for (const day of Object.values(state.days)) {
-      const index = day.tasks.findIndex((task) => task.id === id);
-      if (index < 0) continue;
-      const [task] = day.tasks.splice(index, 1);
-      save();
-      announce(`Removed ${displayTitle(task)}.`);
-      renderAll();
-      return;
-    }
-  }
-
-  function statusText(task) {
-    if (task.status === "running") return "Timing";
-    if (task.status === "paused") return "Paused";
-    if (task.status === "done") {
-      const doneAt = task.completedAt ? `Done at ${clockTime(task.completedAt)}` : "Done";
-      const startedAt = task.firstStartedAt
-        || (task.completedAt && task.accumulatedMs > 0 ? task.completedAt - task.accumulatedMs : null);
-      if ((task.accumulatedMs || 0) <= 0) {
-        return task.completedAt ? `${doneAt} · no time recorded` : "Done · no time recorded";
-      }
-      return startedAt ? `Started at ${clockTime(startedAt)} · ${doneAt}` : doneAt;
-    }
-    return "Not started";
-  }
-
-  function actionButton(text, action, id, variant) {
-    return el("button", {
-      type: "button",
-      class: variant ? `btn ${variant}` : "btn",
-      "data-action": action,
-      "data-id": id,
-      text,
-    });
-  }
-
-  function cardMeta(name, tasks) {
-    if (!tasks.length) {
-      if (name === "Tomorrow") return "Nothing planned";
-      if (name === "Yesterday") return "Nothing recorded";
-      return "Nothing yet";
-    }
-    const done = tasks.filter((task) => task.status === "done").length;
-    if (name === "Tomorrow" && done === 0) return `${tasks.length} planned`;
-    return `${done} of ${tasks.length} done`;
-  }
-
-  function emptyCopy(key) {
-    const relation = dayRelation(key);
-    if (relation === "Today") {
-      return "Your list for today is empty. Add what you want to finish, then press Start when you begin.";
-    }
-    if (relation === "Tomorrow") return "Nothing planned for tomorrow yet. You can line the day up now.";
-    if (relation === "Yesterday") return "Nothing was recorded yesterday.";
-    return "Nothing was recorded on this day.";
-  }
-
-  function renderHeader() {
-    setText(document.getElementById("wall-date"), formatDay(todayKey()));
-  }
-
-  function renderCards() {
-    const today = todayKey();
-    const specs = [
-      { key: addDays(today, -1), name: "Yesterday" },
-      { key: today, name: "Today" },
-      { key: addDays(today, 1), name: "Tomorrow" },
-    ];
-    const running = runningTask();
-    const cards = specs.map(({ key, name }) => {
-      const tasks = dayTasks(key);
-      const timing = running && running.key === key;
-      return el("button", {
-        type: "button",
-        class: `day-card${key === today ? " today" : ""}`,
-        "data-action": "select-day",
-        "data-day": key,
-        "aria-pressed": key === state.selected ? "true" : "false",
-      }, [
-        el("span", { class: "card-kicker" }, [
-          el("span", { class: "eyebrow", text: name }),
-          timing ? el("span", { class: "rec", "aria-label": "Timer running" }) : null,
-        ]),
-        el("span", { class: "card-date", text: formatCardDate(key) }),
-        el("span", {
-          class: "time card-time",
-          "data-day-time": key,
-          "data-format": "compact",
-          text: formatCompact(dayTotal(key), liveFor(key)),
-        }),
-        el("span", { class: "quiet", text: cardMeta(name, tasks) }),
-      ]);
-    });
-    document.getElementById("day-cards").replaceChildren(el("div", { class: "days" }, cards));
-  }
-
-  function watchSide() {
-    return el("div", { class: "watch-side" }, [
-      el("p", { class: "eyebrow", text: "Today so far" }),
-      el("p", {
-        class: "side-time time",
-        "data-day-time": "__today__",
-        "data-format": "clock",
-        text: formatClock(totalFor("__today__")),
-      }),
-      el("p", {
-        class: "watch-words",
-        "data-day-time": "__today__",
-        "data-format": "words",
-        text: formatWords(totalFor("__today__"), liveFor("__today__")),
-      }),
-    ]);
-  }
-
-  function renderStopwatch() {
-    const running = runningTask();
-    const root = document.getElementById("stopwatch");
-    const freeOn = !running && freeWatchRunning();
-    root.className = running || freeOn ? "watch" : "watch is-idle";
-    if (!running && !freeOn) {
-      const held = freeWatch.accumulatedMs > 0;
-      root.replaceChildren(
-        el("div", { class: "watch-main" }, [
-          el("p", { class: "eyebrow", text: "Stopwatch" }),
-          el("h2", { class: "watch-task", text: held ? "Stopped" : "Stopwatch" }),
-          el("p", {
-            class: "watch-time time",
-            "data-watch-time": "clock",
-            text: formatClock(freeWatch.accumulatedMs),
-          }),
-          el("p", {
-            class: "watch-help",
-            text: "Press Start to time something on its own. End stops the clock. This time stays on the stopwatch and is not added to a task.",
-          }),
-          el("div", { class: "watch-actions" }, [
-            el("button", { type: "button", class: "btn primary", "data-action": "watch-start", text: "Start" }),
-          ]),
-        ]),
-        watchSide(),
-      );
-      return;
-    }
-    if (freeOn) {
-      root.replaceChildren(
-        el("div", { class: "watch-main" }, [
-          el("p", { class: "eyebrow watch-kicker" }, [
-            el("span", { class: "rec", "aria-hidden": "true" }),
-            el("span", { text: "Stopwatch" }),
-          ]),
-          el("h2", { class: "watch-task", text: "Timing" }),
-          el("p", {
-            class: "watch-time time",
-            "data-watch-time": "clock",
-            text: formatClock(freeWatchElapsed()),
-          }),
-          el("p", {
-            class: "watch-words",
-            "data-watch-time": "words",
-            text: formatWords(freeWatchElapsed(), true),
-          }),
-          el("div", { class: "watch-actions" }, [
-            el("button", { type: "button", class: "btn primary", "data-action": "watch-end", text: "End" }),
-          ]),
-        ]),
-        watchSide(),
-      );
-      return;
-    }
-    const { task, key } = running;
-    const where = dayRelation(key) || formatDay(key);
-    root.replaceChildren(
-      el("div", { class: "watch-main" }, [
-        el("p", { class: "eyebrow watch-kicker" }, [
-          el("span", { class: "rec", "aria-hidden": "true" }),
-          el("span", { text: "Timing now" }),
-        ]),
-        el("h2", { class: "watch-task", "data-title-for": task.id, text: displayTitle(task) }),
-        el("p", { class: "watch-where", text: where }),
-        el("p", {
-          class: "watch-time time",
-          "data-task-time": task.id,
-          "data-format": "clock",
-          text: formatClock(elapsed(task)),
-        }),
-        el("p", {
-          class: "watch-words",
-          "data-task-time": task.id,
-          "data-format": "words",
-          text: formatWords(elapsed(task), true),
-        }),
-        el("div", { class: "watch-actions" }, [
-          actionButton("Pause", "pause", task.id),
-          actionButton("Mark done", "done", task.id, "good"),
-        ]),
-      ]),
-      watchSide(),
-    );
-  }
-
-  function createTaskRow(task) {
-    const done = task.status === "done";
-    const check = el("button", {
-      type: "button",
-      class: "check",
-      "data-action": "toggle",
-      "data-id": task.id,
-      "aria-pressed": done ? "true" : "false",
-      "aria-label": done ? `Reopen ${displayTitle(task)}` : `Mark ${displayTitle(task)} done`,
-      text: done ? "✓" : "",
-    });
-    const title = el("input", {
-      class: "task-title",
-      value: task.title,
-      maxlength: "140",
-      "aria-label": "Task name",
-      autocomplete: "off",
-    });
-    title.value = task.title;
-    const actions = el("div", { class: "task-actions" });
-    if (task.status === "running") {
-      actions.append(actionButton("Pause", "pause", task.id));
-      actions.append(actionButton("Done", "done", task.id, "good"));
-    } else if (task.status === "paused") {
-      actions.append(actionButton("Resume", "start", task.id));
-      actions.append(actionButton("Done", "done", task.id, "good"));
-    } else if (task.status === "pending") {
-      actions.append(actionButton("Start", "start", task.id));
-    }
-    const remove = actionButton(confirmDelete === task.id ? "Remove?" : "Delete", "delete", task.id, confirmDelete === task.id ? "danger" : "");
-    actions.append(remove);
-    const row = el("article", { class: `task ${task.status}`, role: "listitem" }, [
-      check,
-      el("div", { class: "task-main" }, [
-        title,
-        el("p", { class: "status", text: statusText(task) }),
-      ]),
-      el("div", { class: "task-side" }, [
-        el("p", {
-          class: "time task-clock",
-          "data-task-time": task.id,
-          "data-format": "clock",
-          text: formatClock(elapsed(task)),
-        }),
-        actions,
-      ]),
-    ]);
-    title.addEventListener("focus", () => {
-      title.dataset.prev = task.title;
-    });
-    title.addEventListener("input", () => {
-      task.title = title.value;
-      save();
-      syncTitleDisplays(task);
-      check.setAttribute("aria-label", task.status === "done"
-        ? `Reopen ${displayTitle(task)}`
-        : `Mark ${displayTitle(task)} done`);
-    });
-    title.addEventListener("blur", () => {
-      const next = title.value.trim();
-      const fallback = (title.dataset.prev || "").trim();
-      task.title = (next || fallback || "Untitled").slice(0, 140);
-      title.value = task.title;
-      save();
-      syncTitleDisplays(task);
-    });
-    return row;
-  }
-
-  function renderTasks() {
-    const key = state.selected;
-    const tasks = dayTasks(key);
-    const relation = dayRelation(key);
-    setText(document.getElementById("list-title"), relation || formatDay(key));
-    setText(document.getElementById("list-date"), relation ? formatDay(key) : "Recorded day");
-    document.getElementById("back-today").hidden = key === todayKey();
-    setText(document.getElementById("composer-label"), `Add to ${relation || formatDay(key)}`);
-
-    const stats = document.getElementById("list-stats");
-    if (!tasks.length) {
-      stats.textContent = "No tasks yet";
+    if (found.task.status === "done") {
+      found.task.completedAt = null;
+      found.task.startedAt = null;
+      found.task.status = found.task.accumulatedMs > 0 ? "paused" : "pending";
     } else {
-      const done = tasks.filter((task) => task.status === "done").length;
-      stats.replaceChildren(
-        document.createTextNode(`${done} of ${tasks.length} done · `),
-        el("span", {
-          class: "time",
-          "data-day-time": key,
-          "data-format": "compact",
-          text: formatCompact(dayTotal(key), liveFor(key)),
-        }),
-      );
+      const now = Date.now();
+      stopTaskTimer(found.task, now);
+      found.task.status = "done";
+      found.task.completedAt = now;
+      found.task.startedAt = null;
     }
 
-    const list = document.getElementById("task-list");
-    if (!tasks.length) {
-      list.removeAttribute("role");
-      list.removeAttribute("aria-label");
-      list.replaceChildren(el("p", { class: "empty", text: emptyCopy(key) }));
-    } else {
-      list.setAttribute("role", "list");
-      list.setAttribute("aria-label", `Tasks for ${relation || formatDay(key)}`);
-      list.replaceChildren(...tasks.map(createTaskRow));
-    }
-    renderDayTotal(key, tasks.length > 0);
+    persistData();
+    renderAll();
   }
 
-  function renderDayTotal(key, visible) {
-    const root = document.getElementById("day-total");
-    if (!visible) {
-      root.hidden = true;
-      root.replaceChildren();
+  function requestDeleteTask(dayKey, taskId) {
+    if (state.deleteConfirmId === taskId) {
+      deleteTask(dayKey, taskId);
       return;
     }
-    root.hidden = false;
-    root.replaceChildren(
-      el("p", { class: "eyebrow", text: "Total for this day" }),
-      el("p", {
-        class: "time total-clock",
-        "data-day-time": key,
-        "data-format": "clock",
-        text: formatClock(dayTotal(key)),
-      }),
-      el("p", {
-        class: "quiet",
-        "data-day-time": key,
-        "data-format": "words",
-        text: formatWords(dayTotal(key), liveFor(key)),
-      }),
-    );
+
+    clearDeleteConfirmation();
+    state.deleteConfirmId = taskId;
+    state.deleteConfirmTimer = window.setTimeout(() => {
+      state.deleteConfirmId = null;
+      renderTasks(Date.now());
+    }, 4500);
+    renderTasks(Date.now());
   }
 
-  function flowTasks(tasks) {
-    const started = [];
-    const waiting = [];
-    for (const task of tasks) {
-      if (task.firstStartedAt || task.completedAt) started.push(task);
-      else waiting.push(task);
+  function clearDeleteConfirmation() {
+    if (state.deleteConfirmTimer) window.clearTimeout(state.deleteConfirmTimer);
+    state.deleteConfirmTimer = null;
+    state.deleteConfirmId = null;
+  }
+
+  function deleteTask(dayKey, taskId) {
+    const day = state.data.days[dayKey];
+    if (!day) return;
+
+    day.tasks = day.tasks.filter((task) => task.id !== taskId);
+    if (!day.tasks.length && dayKey < state.todayKey) delete state.data.days[dayKey];
+
+    clearDeleteConfirmation();
+    persistData();
+    renderAll();
+  }
+
+  function pauseRunningTask(now, exceptId) {
+    const running = runningTask();
+    if (!running || running.task.id === exceptId) return;
+    stopTaskTimer(running.task, now);
+  }
+
+  function stopTaskTimer(task, at) {
+    task.accumulatedMs = Math.round(taskElapsed(task, at));
+    task.startedAt = null;
+    if (task.status === "running") task.status = "paused";
+  }
+
+  function runningTask() {
+    for (const dayKey of Object.keys(state.data.days)) {
+      const day = state.data.days[dayKey];
+      if (!day || !Array.isArray(day.tasks)) continue;
+      const task = day.tasks.find((item) => item.status === "running");
+      if (task) return { dayKey, task };
     }
-    started.sort((a, b) => (a.firstStartedAt || a.completedAt) - (b.firstStartedAt || b.completedAt));
-    return started.concat(waiting);
+    return null;
   }
 
-  function flowLabel(task) {
-    if (task.status === "running") return "Timing";
-    if (task.status === "paused") return "Paused";
-    if (task.status === "done") return "✓ Done";
-    return "Planned";
-  }
-
-  function renderFlow() {
-    const tasks = dayTasks(state.selected);
-    const root = document.getElementById("flow");
-    if (!tasks.length) {
-      root.replaceChildren(el("p", {
-        class: "empty",
-        text: "The flow chart appears here once you add tasks. Steps line up in the order you work them.",
-      }));
-      return;
+  function findTask(taskId, dayKey) {
+    if (!taskId) return null;
+    const keys = dayKey ? [dayKey] : Object.keys(state.data.days);
+    for (const key of keys) {
+      const day = state.data.days[key];
+      if (!day || !Array.isArray(day.tasks)) continue;
+      const task = day.tasks.find((item) => item.id === taskId);
+      if (task) return { dayKey: key, task };
     }
-    const flow = el("div", { class: "flow", role: "list" });
-    const push = (node) => {
-      node.setAttribute("role", "listitem");
-      flow.append(node);
+    return null;
+  }
+
+  function getDayTasks(dayKey) {
+    const day = state.data.days[dayKey];
+    return day && Array.isArray(day.tasks) ? day.tasks : [];
+  }
+
+  function ensureDay(dayKey) {
+    if (!state.data.days[dayKey]) state.data.days[dayKey] = { tasks: [] };
+    if (!Array.isArray(state.data.days[dayKey].tasks)) state.data.days[dayKey].tasks = [];
+    return state.data.days[dayKey];
+  }
+
+  function compareTasks(a, b) {
+    return (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(String(b.id));
+  }
+
+  function taskElapsed(task, now) {
+    const base = Math.max(0, Number(task.accumulatedMs) || 0);
+    const clock = Number.isFinite(now) ? now : Date.now();
+    if (task.status === "running" && Number.isFinite(task.startedAt)) {
+      return base + Math.max(0, clock - task.startedAt);
+    }
+    return base;
+  }
+
+  function doneLine(task) {
+    const accumulated = Math.max(0, Math.round(Number(task.accumulatedMs) || 0));
+    const done = Number.isFinite(task.completedAt) ? task.completedAt : null;
+    let start = Number.isFinite(task.firstStartedAt) ? task.firstStartedAt : null;
+
+    if (!start && done && accumulated > 0) {
+      start = done - accumulated;
+    }
+
+    if (accumulated > 0 && start && done) {
+      return "Started at " + formatTimeOfDay(start) + " · Done at " + formatTimeOfDay(done);
+    }
+    if (accumulated > 0 && start) {
+      return "Started at " + formatTimeOfDay(start);
+    }
+    if (accumulated > 0 && done) {
+      return "Done at " + formatTimeOfDay(done);
+    }
+    if (done) {
+      return "Done at " + formatTimeOfDay(done) + " · no time recorded";
+    }
+    return "Done · no time recorded";
+  }
+
+  function startAloneWatch() {
+    if (runningTask()) return;
+    state.watch = { accumulatedMs: 0, startedAt: Date.now() };
+    persistWatch();
+    renderAll();
+  }
+
+  function endAloneWatch() {
+    if (!Number.isFinite(state.watch.startedAt)) return;
+    state.watch = {
+      accumulatedMs: Math.round(watchElapsed(Date.now())),
+      startedAt: null
     };
-    push(el("div", { class: "node bookend" }, [
-      el("p", { class: "eyebrow", text: "Start" }),
-      el("p", { class: "node-title", text: dayRelation(state.selected) || formatCardDate(state.selected) }),
-    ]));
-    flowTasks(tasks).forEach((task, index) => {
-      flow.append(el("div", { class: "arrow", "aria-hidden": "true" }));
-      push(el("div", { class: `node ${task.status}` }, [
-        el("p", { class: "eyebrow", text: `Step ${index + 1}` }),
-        el("p", { class: "node-title", "data-title-for": task.id, text: displayTitle(task) }),
-        el("p", {
-          class: "time",
-          "data-task-time": task.id,
-          "data-format": "compact",
-          text: formatCompact(elapsed(task), task.status === "running"),
-        }),
-        el("p", { class: "quiet", text: flowLabel(task) }),
-      ]));
-    });
-    flow.append(el("div", { class: "arrow", "aria-hidden": "true" }));
-    push(el("div", { class: "node bookend" }, [
-      el("p", { class: "eyebrow", text: "Total" }),
-      el("p", {
-        class: "time",
-        "data-day-time": state.selected,
-        "data-format": "compact",
-        text: formatCompact(dayTotal(state.selected), liveFor(state.selected)),
-      }),
-    ]));
-    root.replaceChildren(flow);
-    const live = flow.querySelector(".node.running");
-    if (live) {
-      const left = live.offsetLeft - flow.clientWidth / 2 + live.clientWidth / 2;
-      flow.scrollLeft = Math.max(0, left);
-    }
+    persistWatch();
+    renderAll();
   }
 
-  function renderHistory() {
-    const keys = lastNDays(7);
-    const columns = keys.map((key) => el("button", {
-      type: "button",
-      class: `week-col${key === todayKey() ? " is-today" : ""}`,
-      "data-action": "select-day",
-      "data-day": key,
-      "aria-pressed": key === state.selected ? "true" : "false",
-    }, [
-      el("span", { class: "bar-track" }, [
-        el("span", { class: "bar", "data-week-bar": key }),
-      ]),
-      el("span", { class: "week-name", text: parseKey(key).toLocaleDateString(undefined, { weekday: "short" }) }),
-      el("span", {
-        class: "time week-value",
-        "data-day-time": key,
-        "data-format": "compact",
-        text: formatCompact(dayTotal(key), liveFor(key)),
-      }),
-    ]));
-
-    const weekStart = keys[0];
-    const olderKeys = Object.keys(state.days)
-      .filter((key) => key < weekStart && dayTasks(key).length)
-      .sort()
-      .reverse();
-
-    const parts = [
-      el("div", { class: "week" }, columns),
-      el("div", { class: "history-totals" }, [
-        el("p", {}, [
-          "This week: ",
-          el("span", {
-            class: "time",
-            "data-day-time": "__week__",
-            "data-format": "words",
-            text: formatWords(weekTotal(), liveFor("__week__")),
-          }),
-        ]),
-        el("p", {}, [
-          "All recorded days: ",
-          el("span", {
-            class: "time",
-            "data-day-time": "__all__",
-            "data-format": "words",
-            text: formatWords(allTotal(), liveFor("__all__")),
-          }),
-        ]),
-      ]),
-    ];
-
-    if (olderKeys.length) {
-      parts.push(el("h3", { text: "Earlier" }));
-      parts.push(el("div", { class: "older" }, olderKeys.map((key) => {
-        const tasks = dayTasks(key);
-        const done = tasks.filter((task) => task.status === "done").length;
-        return el("button", {
-          type: "button",
-          class: "older-row",
-          "data-action": "select-day",
-          "data-day": key,
-          "aria-pressed": key === state.selected ? "true" : "false",
-        }, [
-          el("span", { text: formatDay(key) }),
-          el("span", { class: "quiet", text: `${done} of ${tasks.length} done` }),
-          el("span", {
-            class: "time",
-            "data-day-time": key,
-            "data-format": "compact",
-            text: formatCompact(dayTotal(key), liveFor(key)),
-          }),
-        ]);
-      })));
-    }
-
-    document.getElementById("history").replaceChildren(...parts);
+  function freezeAloneWatch(now) {
+    if (!Number.isFinite(state.watch.startedAt)) return;
+    state.watch = {
+      accumulatedMs: Math.round(watchElapsed(now)),
+      startedAt: null
+    };
   }
 
-  function paintBars(now = Date.now()) {
-    const bars = [...document.querySelectorAll("[data-week-bar]")];
-    if (!bars.length) return;
-    const usable = 64;
-    const values = bars.map((bar) => dayTotal(bar.getAttribute("data-week-bar"), now));
-    const max = Math.max(...values, 1);
-    bars.forEach((bar, index) => {
-      const ms = values[index];
-      const px = ms <= 0 ? 2 : Math.max(6, Math.min(usable, Math.round((ms / max) * usable)));
-      bar.style.height = `${px}px`;
-      bar.style.maxHeight = `${usable}px`;
-      bar.classList.toggle("is-empty", ms <= 0);
-    });
+  function watchElapsed(now) {
+    const base = Math.max(0, Number(state.watch.accumulatedMs) || 0);
+    if (Number.isFinite(state.watch.startedAt)) {
+      return base + Math.max(0, now - state.watch.startedAt);
+    }
+    return base;
   }
 
-  function paintTimes(stamp) {
-    for (const day of Object.values(state.days)) {
-      for (const task of day.tasks) {
-        if (task.status === "running" && task.startedAt && stamp < task.startedAt) {
-          task.startedAt = stamp;
-          save();
-        }
-      }
-    }
-    document.querySelectorAll("[data-task-time]").forEach((node) => {
-      const found = findTask(node.getAttribute("data-task-time"));
-      if (!found) return;
-      const live = found.task.status === "running";
-      setText(node, textFor(node.getAttribute("data-format") || "clock", elapsed(found.task, stamp), live));
-    });
-    document.querySelectorAll("[data-day-time]").forEach((node) => {
-      const token = node.getAttribute("data-day-time");
-      setText(node, textFor(node.getAttribute("data-format") || "compact", totalFor(token, stamp), liveFor(token)));
-    });
-    document.querySelectorAll("[data-watch-time]").forEach((node) => {
-      if (freeWatch.startedAt && stamp < freeWatch.startedAt) {
-        freeWatch.startedAt = stamp;
-        saveFreeWatch();
-      }
-      setText(node, textFor(node.getAttribute("data-watch-time") || "clock", freeWatchElapsed(stamp), freeWatchRunning()));
-    });
+  function renderStopwatch(now) {
     const running = runningTask();
-    const nextTitle = running
-      ? `${formatClock(elapsed(running.task, stamp))} · ${displayTitle(running.task)} · Daybook`
-      : freeWatchRunning()
-        ? `${formatClock(freeWatchElapsed(stamp))} · Stopwatch · Daybook`
-        : "Daybook";
-    if (document.title !== nextTitle) document.title = nextTitle;
-    paintBars(stamp);
-    paintGoals(stamp);
+    const watchRunning = Number.isFinite(state.watch.startedAt);
+    els.stopwatch.classList.toggle("is-live", Boolean(running) || watchRunning);
+
+    if (running) {
+      els.stopwatchMode.textContent = "Running task";
+      els.stopwatchTime.textContent = clockText(taskElapsed(running.task, now));
+      els.stopwatchTask.textContent = running.task.title;
+      els.stopwatchActions.innerHTML =
+        '<button class="btn btn-ghost" type="button" data-action="pause-task" data-day="' + esc(running.dayKey) +
+        '" data-task-id="' + esc(running.task.id) + '">Pause</button>' +
+        '<button class="btn btn-green" type="button" data-action="done-task" data-day="' + esc(running.dayKey) +
+        '" data-task-id="' + esc(running.task.id) + '">Mark done</button>';
+    } else {
+      els.stopwatchMode.textContent = "Stopwatch on its own";
+      els.stopwatchTime.textContent = clockText(watchElapsed(now));
+      if (watchRunning) {
+        els.stopwatchTask.textContent = "A timer on its own. This time is not added to tasks, today, or your goal.";
+      } else if (state.watch.accumulatedMs > 0) {
+        els.stopwatchTask.textContent = "Frozen at " + formatClockForText(state.watch.accumulatedMs) +
+          ". It is not counted anywhere. Start again from zero.";
+      } else {
+        els.stopwatchTask.textContent = "Nothing is running. Start a task, or use the stopwatch by itself.";
+      }
+
+      els.stopwatchActions.innerHTML =
+        '<button class="btn btn-primary" type="button" data-action="watch-start"' +
+        (watchRunning ? " disabled" : "") + ">Start</button>" +
+        '<button class="btn btn-ghost" type="button" data-action="watch-end"' +
+        (watchRunning ? "" : " disabled") + ">End</button>";
+    }
+
+    updateStopwatchLive(now);
   }
 
-  function loadGoal() {
-    try {
-      const data = JSON.parse(localStorage.getItem(GOAL_KEY) || "null");
-      const ms = Number(data && data.ms);
-      if (!Number.isFinite(ms) || ms <= 0) return { ms: 0, since: "" };
-      const since = typeof data.since === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.since)
-        ? data.since
-        : "";
-      return { ms: Math.min(ms, 24 * 60 * 60 * 1000), since };
-    } catch {
-      return { ms: 0, since: "" };
+  function updateStopwatchLive(now) {
+    const running = runningTask();
+    const todayTotal = dayCountedTotal(state.todayKey, now);
+
+    if (running) {
+      els.stopwatchTime.textContent = clockText(taskElapsed(running.task, now));
+      els.stopwatchToday.innerHTML = "Today so far: <strong>" + esc(formatDuration(todayTotal)) +
+        "</strong> · this task: <strong>" + esc(clockText(taskElapsed(running.task, now))) + "</strong>";
+    } else {
+      els.stopwatchTime.textContent = clockText(watchElapsed(now));
+      els.stopwatchToday.innerHTML = "Today so far: <strong>" + esc(formatDuration(todayTotal)) +
+        "</strong> · stopwatch-only time is not counted.";
     }
+  }
+
+  function updateLiveTaskTimes(now) {
+    const timers = document.querySelectorAll("[data-elapsed-id]");
+    timers.forEach((element) => {
+      const task = findTask(element.dataset.elapsedId, state.selectedDay);
+      if (task) element.textContent = clockText(taskElapsed(task.task, now));
+    });
   }
 
   function goalMs() {
-    return loadGoal().ms;
+    return state.goal && Number.isFinite(state.goal.ms) ? Math.max(0, Math.round(state.goal.ms)) : 0;
   }
 
   function goalSince() {
-    const goal = loadGoal();
-    if (!goal.ms) return "";
-    return goal.since || todayKey();
+    return state.goal && isDayKey(state.goal.since) ? state.goal.since : null;
   }
 
-  function saveGoal(ms) {
-    const since = loadGoal().since || todayKey();
-    localStorage.setItem(GOAL_KEY, JSON.stringify({ ms, since }));
+  function goalExists() {
+    return goalMs() > 0 && Boolean(goalSince());
   }
 
-  function rememberGoalStart() {
-    const goal = loadGoal();
-    if (!goal.ms || goal.since) return;
-    localStorage.setItem(GOAL_KEY, JSON.stringify({ ms: goal.ms, since: todayKey() }));
+  function goalForDay(dayKey) {
+    if (!goalExists()) return 0;
+    return dayKey >= goalSince() ? goalMs() : 0;
   }
 
-  function loadGoalResults() {
-    try {
-      const data = JSON.parse(localStorage.getItem(GOAL_RESULTS_KEY) || "null");
-      return data && typeof data === "object" ? data : {};
-    } catch {
-      return {};
+  function priorCountedForTask(taskId, beforeDayKey) {
+    let total = 0;
+    for (const [key, result] of Object.entries(state.results)) {
+      if (key >= beforeDayKey) continue;
+      if (result && result.counted && Object.prototype.hasOwnProperty.call(result.counted, taskId)) {
+        total += Math.max(0, Number(result.counted[taskId]) || 0);
+      }
     }
+    return total;
   }
 
-  function saveGoalResults(results) {
-    localStorage.setItem(GOAL_RESULTS_KEY, JSON.stringify(results));
+  function countedForTaskOnDay(task, dayKey, now) {
+    if (dayKey < state.todayKey) {
+      const result = state.results[dayKey];
+      if (result) {
+        if (result.counted && Object.prototype.hasOwnProperty.call(result.counted, task.id)) {
+          return Math.max(0, Math.round(Number(result.counted[task.id]) || 0));
+        }
+        return 0;
+      }
+    }
+
+    const elapsed = taskElapsed(task, now);
+    return Math.max(0, Math.round(elapsed - priorCountedForTask(task.id, dayKey)));
   }
 
-  function goalCredit(taskId, results) {
-    const since = goalSince();
-    let sum = 0;
-    Object.entries(results).forEach(([key, record]) => {
-      if (since && key < since) return;
-      const portion = record && record.counted && Number(record.counted[taskId]);
-      if (Number.isFinite(portion) && portion > 0) sum += portion;
-    });
-    return sum;
-  }
+  function dayCountedTotal(dayKey, now) {
+    if (dayKey < state.todayKey && state.results[dayKey]) {
+      return Math.max(0, Math.round(Number(state.results[dayKey].totalMs) || 0));
+    }
 
-  function goalDayTotal(key, stamp, results) {
-    return dayTasks(key).reduce((sum, task) => {
-      return sum + Math.max(0, elapsed(task, stamp) - goalCredit(task.id, results));
+    return getDayTasks(dayKey).reduce((total, task) => {
+      return total + countedForTaskOnDay(task, dayKey, now);
     }, 0);
   }
 
-  function settleGoalDays(now = new Date()) {
-    const goal = goalMs();
-    const since = goalSince();
-    if (!goal || !since) return;
-    const today = todayKey(now);
-    const stamp = now.getTime();
-    const results = loadGoalResults();
-    const keys = new Set(Object.keys(state.days).filter((key) => key < today));
-    for (let i = 1; i <= 7; i += 1) keys.add(addDays(today, -i));
-    let changed = false;
-    [...keys].sort().forEach((key) => {
-      if (key < since) {
-        if (results[key]) {
-          delete results[key];
-          changed = true;
-        }
-        return;
-      }
-      if (results[key]) return;
-      const counted = {};
-      let totalMs = 0;
-      dayTasks(key).forEach((task) => {
-        const portion = Math.max(0, elapsed(task, stamp) - goalCredit(task.id, results));
-        if (portion > 0) counted[task.id] = portion;
-        totalMs += portion;
-      });
-      results[key] = { totalMs, goalMs: goal, met: totalMs >= goal, counted };
-      changed = true;
-    });
-    if (changed) saveGoalResults(results);
-  }
+  function saveGoalFromForm(event) {
+    event.preventDefault();
 
-  function renderGoal() {
-    const root = document.getElementById("goal-board");
-    const goal = goalMs();
-    const hours = document.getElementById("goal-hours");
-    const minutes = document.getElementById("goal-minutes");
-    if (hours && document.activeElement !== hours) hours.value = String(Math.floor(goal / 3600000));
-    if (minutes && document.activeElement !== minutes) {
-      minutes.value = String(Math.floor((goal % 3600000) / 60000));
-    }
-    if (!goal) {
-      root.replaceChildren(el("p", {
-        class: "empty",
-        text: "Set a daily goal. From that day on, a day gets a green tick when you reach it. Earlier days say you didn't add a goal.",
-      }));
+    const hoursRaw = els.goalHours.value.trim();
+    const minutesRaw = els.goalMinutes.value.trim();
+
+    if (!hoursRaw && !minutesRaw) {
+      showGoalError("Add hours or minutes for your daily goal.");
       return;
     }
-    const cards = lastNDays(7).slice().reverse().map((key) => el("article", {
-      class: "goal-card",
-      "data-goal-day": key,
-    }, [
-      el("span", { class: "goal-mark", "data-goal-mark": key, "aria-hidden": "true", text: "" }),
-      el("div", { class: "goal-copy" }, [
-        el("p", { class: "goal-day", text: dayRelation(key) || formatCardDate(key) }),
-        el("p", { class: "goal-progress", "data-goal-progress": key, text: "" }),
-        el("p", { class: "goal-state", "data-goal-state": key, text: "" }),
-      ]),
-    ]));
-    root.replaceChildren(el("div", { class: "goal-board" }, cards));
-  }
 
-  function paintGoals(stamp) {
-    const goal = goalMs();
-    if (!goal) return;
-    const today = todayKey(new Date(stamp));
-    const since = goalSince();
-    const results = loadGoalResults();
-    document.querySelectorAll("[data-goal-day]").forEach((card) => {
-      const key = card.getAttribute("data-goal-day");
-      const mark = card.querySelector("[data-goal-mark]");
-      const progress = card.querySelector("[data-goal-progress]");
-      const state = card.querySelector("[data-goal-state]");
-      if (since && key < since) {
-        card.classList.remove("is-met", "is-short");
-        card.classList.add("is-unset");
-        setText(mark, "");
-        setText(progress, "");
-        setText(state, "Didn't add a goal");
-        return;
-      }
-      card.classList.remove("is-unset");
-      const saved = key < today ? results[key] : null;
-      const total = saved ? saved.totalMs : goalDayTotal(key, stamp, results);
-      const target = saved ? saved.goalMs : goal;
-      const met = saved ? Boolean(saved.met) : total >= target;
-      card.classList.toggle("is-met", met);
-      card.classList.toggle("is-short", !met);
-      setText(mark, met ? "✓" : "×");
-      setText(progress, `${formatWords(total, !saved && liveFor(key))} of ${formatWords(target)}`);
-      setText(state, met ? "Goal completed" : "Goal not completed");
-    });
-  }
+    const hours = Number(hoursRaw || 0);
+    const minutes = Number(minutesRaw || 0);
 
-  function renderAll() {
-    renderHeader();
-    renderCards();
-    renderStopwatch();
-    renderTasks();
-    renderFlow();
-    renderHistory();
-    renderGoal();
-    paintTimes(Date.now());
-  }
-
-  function tick() {
-    const now = new Date();
-    const key = todayKey(now);
-    if (key !== knownToday) {
-      settleGoalDays(now);
-      knownToday = key;
-      const moved = rollUnfinished(now);
-      renderAll();
-      if (moved) announce(moved === 1
-        ? "Moved 1 unfinished task to today."
-        : `Moved ${moved} unfinished tasks to today.`);
+    if (!Number.isInteger(hours) || hours < 0 || hours > 24) {
+      showGoalError("Enter hours from 0 to 24.");
       return;
     }
-    const wall = document.getElementById("wall-clock");
-    setText(wall, now.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-    }));
-    paintTimes(now.getTime());
-  }
-
-  function onClick(event) {
-    const button = event.target.closest("[data-action]");
-    if (!button) return;
-    const { action, id } = button.dataset;
-    if (action === "select-day") selectDay(button.dataset.day);
-    else if (action === "select-today") selectDay(todayKey());
-    else if (action === "start") startTask(id);
-    else if (action === "pause") pauseTask(id);
-    else if (action === "done") completeTask(id);
-    else if (action === "toggle") toggleTask(id);
-    else if (action === "delete") deleteTask(id);
-    else if (action === "signup") openSignup();
-    else if (action === "signout") signOut();
-    else if (action === "watch-start") startFreeWatch();
-    else if (action === "watch-end") endFreeWatch();
-  }
-
-  function loadProfile() {
-    try {
-      const data = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null");
-      if (!data || typeof data.name !== "string" || typeof data.email !== "string") return null;
-      const name = data.name.trim().slice(0, 80);
-      const email = data.email.trim().slice(0, 120);
-      if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
-      const picture = typeof data.picture === "string" && data.picture.startsWith("data:image/")
-        ? data.picture
-        : "";
-      return { name, email, picture };
-    } catch {
-      return null;
-    }
-  }
-
-  function saveProfile(profile) {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-  }
-
-  function renderAccount() {
-    const root = document.getElementById("account");
-    const profile = loadProfile();
-    if (!profile) {
-      root.replaceChildren(el("button", {
-        type: "button",
-        class: "btn primary",
-        "data-action": "signup",
-        text: "Sign up",
-      }));
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
+      showGoalError("Enter minutes from 0 to 59.");
       return;
     }
-    const avatar = profile.picture
-      ? el("img", { class: "avatar", src: profile.picture, alt: "" })
-      : el("span", {
-        class: "avatar avatar-letter",
-        text: profile.name.slice(0, 1).toUpperCase(),
-        "aria-hidden": "true",
-      });
-    root.replaceChildren(
-      el("div", { class: "who" }, [
-        avatar,
-        el("div", {}, [
-          el("p", { class: "who-name", text: profile.name }),
-          el("p", { class: "who-email", text: profile.email }),
-        ]),
-      ]),
-      el("button", {
-        type: "button",
-        class: "btn who-out",
-        "data-action": "signout",
-        text: "Sign out",
-      }),
+
+    const totalMinutes = hours * 60 + minutes;
+    if (totalMinutes < 1) {
+      showGoalError("Set a goal of at least 1 minute.");
+      return;
+    }
+    if (totalMinutes > 24 * 60) {
+      showGoalError("The daily goal cannot be more than 24 hours.");
+      return;
+    }
+
+    const existingSince = goalExists() && isDayKey(state.goal.since) ? state.goal.since : state.todayKey;
+    state.goal = { ms: totalMinutes * MINUTE, since: existingSince };
+    hideGoalError();
+    persistGoal();
+    syncGoalForm(true);
+    renderAll();
+  }
+
+  function showGoalError(message) {
+    els.goalError.textContent = message;
+    els.goalError.hidden = false;
+  }
+
+  function hideGoalError() {
+    els.goalError.textContent = "";
+    els.goalError.hidden = true;
+  }
+
+  function syncGoalForm(force) {
+    const active = document.activeElement;
+    if (!force && (active === els.goalHours || active === els.goalMinutes)) return;
+
+    const ms = goalMs();
+    els.goalHours.value = ms ? String(Math.floor(ms / HOUR)) : "";
+    els.goalMinutes.value = ms ? String(Math.floor((ms % HOUR) / MINUTE)) : "";
+  }
+
+  function renderGoal(now) {
+    const hasGoal = goalExists();
+    const today = state.todayKey;
+
+    if (!hasGoal) {
+      els.goalStatus.className = "goal-status is-neutral";
+      els.goalStatus.innerHTML =
+        '<div class="goal-status-icon">?</div>' +
+        '<div class="goal-status-copy">' +
+          '<div class="goal-status-title">Set a daily goal</div>' +
+          '<div class="goal-status-detail">Pick any amount from 1 minute to 24 hours. A goal of 0 shows no progress marks.</div>' +
+        "</div>";
+      els.goalSince.textContent = "No goal set yet.";
+    } else if (today < goalSince()) {
+      els.goalStatus.className = "goal-status is-neutral";
+      els.goalStatus.innerHTML =
+        '<div class="goal-status-icon">·</div>' +
+        '<div class="goal-status-copy">' +
+          '<div class="goal-status-title">Goal starts later</div>' +
+          '<div class="goal-status-detail">Your first goal day is ' + esc(formatFullDate(goalSince())) + ".</div>" +
+        "</div>";
+      els.goalSince.textContent = "Goal active since " + formatFullDate(goalSince()) + ".";
+    } else {
+      const goal = goalForDay(today);
+      const total = dayCountedTotal(today, now);
+      const met = goal > 0 && total >= goal;
+      const percent = goal > 0 ? Math.min(100, Math.round((total / goal) * 100)) : 0;
+
+      els.goalStatus.className = "goal-status " + (met ? "is-met" : "is-missed");
+      els.goalStatus.innerHTML =
+        '<div class="goal-status-icon">' + (met ? "✓" : "✕") + "</div>" +
+        '<div class="goal-status-copy">' +
+          '<div class="goal-status-title">' + (met ? "Goal completed" : "Goal not completed") + "</div>" +
+          '<div class="goal-status-detail">' + esc(formatDuration(total)) + " of " +
+            esc(formatDuration(goal)) + " · " + percent + "%" +
+            (met ? "" : " · " + esc(formatDuration(Math.max(0, goal - total))) + " to go") +
+          "</div>" +
+          '<div class="goal-meter"><span style="width:' + percent + '%"></span></div>' +
+        "</div>";
+
+      els.goalSince.textContent = goalSince() === today
+        ? "Goal active since today. Changing the amount keeps this start date."
+        : "Goal active since " + formatFullDate(goalSince()) + ". Changing the amount keeps this start date.";
+    }
+
+    renderGoalHistory(now, hasGoal);
+  }
+
+  function renderGoalHistory(now, hasGoal) {
+    const parts = [];
+    for (let index = 0; index < 7; index += 1) {
+      const key = addDaysKey(state.todayKey, -index);
+      const info = goalDayInfo(key, now, hasGoal);
+      const name = index === 0 ? "Today" : index === 1 ? "Yesterday" : formatWeekdayShort(key);
+      const mark = info.kind === "met" ? "✓" : info.kind === "missed" ? "✕" : "·";
+      const className = info.kind === "met" ? " is-met" : info.kind === "missed" ? " is-missed" : "";
+      const title = goalDayTitle(key, info);
+      const detail = info.kind === "before"
+        ? "Didn't add a goal"
+        : info.kind === "none"
+          ? "No goal set"
+          : formatDuration(info.total) + " of " + formatDuration(info.goal);
+
+      parts.push(
+        '<div class="goal-day' + className + '" title="' + esc(title) + '">' +
+          '<span class="goal-day-top">' +
+            '<span class="goal-day-name">' + esc(name) + "</span>" +
+            '<span class="goal-day-date">' + esc(formatDateShort(key)) + "</span>" +
+          "</span>" +
+          '<span class="goal-day-detail">' + esc(detail) + "</span>" +
+          '<span class="goal-day-mark">' + mark + "</span>" +
+        "</div>"
+      );
+    }
+    els.goalHistory.innerHTML = parts.join("");
+  }
+
+  function goalDayInfo(key, now, hasGoal) {
+    if (!hasGoal) {
+      return { kind: "none", total: 0, goal: 0, label: "No goal" };
+    }
+    if (!goalSince() || key < goalSince()) {
+      return { kind: "before", total: 0, goal: 0, label: "Didn't add a goal" };
+    }
+
+    if (key < state.todayKey && state.results[key]) {
+      const result = state.results[key];
+      const goal = Math.max(0, Number(result.goalMs) || 0);
+      if (!goal) return { kind: "none", total: result.totalMs || 0, goal: 0, label: "No goal" };
+      return {
+        kind: result.met ? "met" : "missed",
+        total: Math.max(0, Number(result.totalMs) || 0),
+        goal,
+        label: result.met ? "Goal completed" : "Goal not completed"
+      };
+    }
+
+    const goal = goalForDay(key);
+    if (!goal) return { kind: "none", total: dayCountedTotal(key, now), goal: 0, label: "No goal" };
+    const total = dayCountedTotal(key, now);
+    return {
+      kind: total >= goal ? "met" : "missed",
+      total,
+      goal,
+      label: total >= goal ? "Goal completed" : "Goal not completed"
+    };
+  }
+
+  function goalDayTitle(key, info) {
+    if (info.kind === "before") return formatFullDate(key) + ": Didn't add a goal";
+    if (info.kind === "none") return formatFullDate(key) + ": No goal";
+    return formatFullDate(key) + ": " + info.label + " · " +
+      formatDuration(info.total) + " of " + formatDuration(info.goal);
+  }
+
+  function renderCharts(now) {
+    renderWeekChart(now);
+    renderFlowChart(now);
+  }
+
+  function renderWeekChart(now) {
+    const days = [];
+    for (let index = 0; index < 7; index += 1) {
+      const key = addDaysKey(state.todayKey, -index);
+      days.push({ key, total: dayCountedTotal(key, now) });
+    }
+
+    const max = Math.max(1, Math.max.apply(null, days.map((day) => day.total)));
+    const weekTotal = days.reduce((total, day) => total + day.total, 0);
+
+    els.weekChart.innerHTML = days.map((day) => {
+      const isToday = day.key === state.todayKey;
+      const empty = day.total <= 0;
+      const height = empty ? 4 : Math.max(6, Math.min(64, Math.round((day.total / max) * 64)));
+      const label = isToday ? "Today" : formatWeekdayShort(day.key);
+      const className = "bar-col" + (isToday ? " is-today" : "") + (empty ? " is-empty" : "");
+      return (
+        '<div class="' + className + '" title="' + esc(formatFullDate(day.key) + ": " + formatDuration(day.total)) + '">' +
+          '<span class="bar-value">' + esc(formatDuration(day.total)) + "</span>" +
+          '<div class="bar-track"><div class="bar-fill" style="height:' + height + 'px"></div></div>' +
+          '<span class="bar-label">' + esc(label) + "</span>" +
+        "</div>"
+      );
+    }).join("");
+
+    els.weekTotal.textContent = formatDuration(weekTotal);
+    els.allRecorded.textContent = formatDuration(allRecordedTotal(now));
+    els.weekChart.setAttribute(
+      "aria-label",
+      "Last 7 days task time. Week total " + formatDuration(weekTotal) + "."
     );
   }
 
-  function openSignup() {
-    const dialog = document.getElementById("signup");
-    const error = document.getElementById("signup-error");
-    error.hidden = true;
-    error.textContent = "";
-    if (!dialog.open) dialog.showModal();
+  function allRecordedTotal(now) {
+    const keys = new Set(Object.keys(state.data.days));
+    Object.keys(state.results).forEach((key) => keys.add(key));
+    let total = 0;
+    keys.forEach((key) => {
+      total += dayCountedTotal(key, now);
+    });
+    return total;
   }
 
-  function signOut() {
-    localStorage.removeItem(PROFILE_KEY);
-    renderAccount();
-    announce("Signed out. Your tasks are still on this computer.");
+  function renderFlowChart(now) {
+    const tasks = getDayTasks(state.selectedDay).slice().sort(compareTasks);
+    const total = tasks.reduce((sum, task) => {
+      return sum + countedForTaskOnDay(task, state.selectedDay, now);
+    }, 0);
+
+    els.flowMeta.textContent = dayLabel(state.selectedDay) + " · " + formatDateShort(state.selectedDay);
+
+    const nodes = [];
+    nodes.push(
+      '<div class="flow-node is-start">' +
+        '<span class="flow-index">▶</span>' +
+        '<div class="flow-main">' +
+          '<div class="flow-name">Start</div>' +
+          '<div class="flow-sub">' + esc(formatFullDate(state.selectedDay)) + "</div>" +
+        "</div>" +
+        '<span class="flow-time">—</span>' +
+      "</div>"
+    );
+
+    tasks.forEach((task, index) => {
+      const status = flowStatusLabel(task.status);
+      const stepMs = countedForTaskOnDay(task, state.selectedDay, now);
+      nodes.push(
+        '<div class="flow-node' + (task.status === "running" ? " is-running" : "") + '">' +
+          '<span class="flow-index">' + (index + 1) + "</span>" +
+          '<div class="flow-main">' +
+            '<div class="flow-name">' + esc(task.title) + "</div>" +
+            '<div class="flow-sub">' + esc(status) + "</div>" +
+          "</div>" +
+          '<span class="flow-time">' + esc(clockText(stepMs)) + "</span>" +
+        "</div>"
+      );
+    });
+
+    nodes.push(
+      '<div class="flow-node is-total">' +
+        '<span class="flow-index">Σ</span>' +
+        '<div class="flow-main">' +
+          '<div class="flow-name">Total</div>' +
+          '<div class="flow-sub">' + tasks.length + " task" + (tasks.length === 1 ? "" : "s") + "</div>" +
+        "</div>" +
+        '<span class="flow-time">' + esc(clockText(total)) + "</span>" +
+      "</div>"
+    );
+
+    els.flowChart.innerHTML = nodes.join("");
   }
 
-  function readPicture(file) {
-    return new Promise((resolve, reject) => {
-      if (!file) {
-        resolve("");
-        return;
-      }
-      if (!file.type || !file.type.startsWith("image/")) {
-        reject(new Error("Choose a picture file."));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error("That picture could not be read."));
-      reader.onload = () => {
-        const img = new Image();
-        img.onerror = () => reject(new Error("That picture could not be read."));
-        img.onload = () => {
-          const size = 96;
-          const canvas = document.createElement("canvas");
-          canvas.width = size;
-          canvas.height = size;
-          const ctx = canvas.getContext("2d");
-          const scale = Math.max(size / img.width, size / img.height);
-          const width = img.width * scale;
-          const height = img.height * scale;
-          ctx.drawImage(img, (size - width) / 2, (size - height) / 2, width, height);
-          resolve(canvas.toDataURL("image/jpeg", 0.82));
-        };
-        img.src = reader.result;
-      };
-      reader.readAsDataURL(file);
+  function flowStatusLabel(status) {
+    if (status === "running") return "Running";
+    if (status === "paused") return "Paused";
+    if (status === "done") return "Done";
+    return "Pending";
+  }
+
+  function updateClock(now) {
+    const date = new Date(now);
+    els.clockTime.textContent = date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+    els.clockDate.textContent = date.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric"
     });
   }
 
-  function init() {
-    state = loadState();
-    loadFreeWatch();
-    if (enforceSingleRunner(state.days)) save();
-    rememberGoalStart();
-    settleGoalDays();
-    const moved = rollUnfinished();
-    knownToday = todayKey();
-    state.selected = knownToday;
-    document.body.addEventListener("click", onClick);
-    document.getElementById("composer").addEventListener("submit", (event) => {
-      event.preventDefault();
-      addTask();
-    });
-    document.getElementById("goal-form").addEventListener("submit", (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const error = document.getElementById("goal-error");
-      const hours = Math.max(0, Math.min(24, Math.floor(Number(form.hours.value) || 0)));
-      const minutes = Math.max(0, Math.min(59, Math.floor(Number(form.minutes.value) || 0)));
-      const ms = ((hours * 60) + minutes) * 60 * 1000;
-      if (ms <= 0) {
-        error.textContent = "Enter at least 1 minute.";
-        error.hidden = false;
-        return;
-      }
-      error.hidden = true;
-      saveGoal(ms);
-      settleGoalDays();
-      renderGoal();
-      paintGoals(Date.now());
-      announce(`Daily goal set to ${formatWords(ms)}.`);
-    });
-    document.getElementById("section-menu").addEventListener("change", (event) => {
-      goToSection(event.target.value);
-    });
-    document.addEventListener("visibilitychange", () => tick());
-    window.addEventListener("focus", () => tick());
-    renderAll();
-    renderAccount();
-    if (moved) {
-      announce(moved === 1
-        ? "Moved 1 unfinished task to today."
-        : `Moved ${moved} unfinished tasks to today.`);
+  function updateTabTitle(now) {
+    const running = runningTask();
+    if (running) {
+      document.title = clockText(taskElapsed(running.task, now)) + " · " + running.task.title + " · Daybook";
+      return;
     }
-    document.getElementById("signup-cancel").addEventListener("click", () => {
-      document.getElementById("signup").close();
-    });
-    document.getElementById("signup-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const error = document.getElementById("signup-error");
-      const name = form.name.value.trim();
-      const email = form.email.value.trim();
-      error.hidden = true;
-      try {
-        const picture = await readPicture(form.picture.files[0]);
-        saveProfile({ name, email, picture });
-        form.reset();
-        document.getElementById("signup").close();
-        renderAccount();
-        announce(`Signed in as ${name}.`);
-      } catch (err) {
-        error.textContent = err && err.message ? err.message : "Sign up did not finish.";
-        error.hidden = false;
-      }
-    });
-    setInterval(tick, 250);
+    if (Number.isFinite(state.watch.startedAt)) {
+      document.title = clockText(watchElapsed(now)) + " Stopwatch · Daybook";
+      return;
+    }
+    document.title = "Daybook · Daily to-do";
   }
 
-  init();
+  function formatClockForText(ms) {
+    return clockText(ms);
+  }
+
+  function clockText(ms) {
+    const seconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    return pad2(hours) + ":" + pad2(minutes) + ":" + pad2(remainder);
+  }
+
+  function formatDuration(ms) {
+    const value = Math.max(0, Number(ms) || 0);
+    const totalMinutes = Math.floor(value / MINUTE);
+    if (totalMinutes === 0) return value > 0 ? "<1m" : "0m";
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours === 0) return minutes + "m";
+    if (minutes === 0) return hours + "h";
+    return hours + "h " + minutes + "m";
+  }
+
+  function formatTimeOfDay(ms) {
+    return new Date(ms).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function formatFullDate(key) {
+    return parseDayKey(key).toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric"
+    });
+  }
+
+  function formatDateShort(key) {
+    return parseDayKey(key).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric"
+    });
+  }
+
+  function formatWeekdayShort(key) {
+    return parseDayKey(key).toLocaleDateString("en-US", { weekday: "short" });
+  }
+
+  function dayLabel(key) {
+    if (key === state.todayKey) return "Today";
+    if (key === addDaysKey(state.todayKey, -1)) return "Yesterday";
+    if (key === addDaysKey(state.todayKey, 1)) return "Tomorrow";
+    return parseDayKey(key).toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "short",
+      day: "numeric"
+    });
+  }
+
+  function ymd(date) {
+    return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate());
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function isDayKey(value) {
+    return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  }
+
+  function parseDayKey(key) {
+    const parts = key.split("-").map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+  }
+
+  function dayStartMs(key) {
+    return parseDayKey(key).getTime();
+  }
+
+  function dayEndMs(key) {
+    return dayStartMs(addDaysKey(key, 1));
+  }
+
+  function addDaysKey(key, days) {
+    const date = parseDayKey(key);
+    date.setDate(date.getDate() + days);
+    return ymd(date);
+  }
+
+  function makeId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return "task-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 9);
+  }
+
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, (character) => HTML_ESCAPES[character]);
+  }
 })();

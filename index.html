@@ -1,145 +1,249 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="A daily to-do list with a live stopwatch, a flow chart of the work, and totals for yesterday, today, and tomorrow." />
-  <meta name="theme-color" content="#faf5ff" />
-  <meta http-equiv="Cache-Control" content="no-cache" />
-  <title>Daybook</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=13" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Daybook · Daily to-do</title>
+  <meta name="description" content="Daybook is a calm, local-only daily to-do list with timers, day cards, a stopwatch, and a daily goal.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=3">
+  <script src="app.js?v=3" defer></script>
 </head>
 <body>
   <div class="page">
-    <header>
-      <div class="brand">
-        <span class="logo" aria-hidden="true">✓</span>
-        <div>
-          <p class="kicker">To-do list</p>
-          <h1>Daybook</h1>
+    <header class="topbar card" aria-label="Daybook header">
+      <a class="brand" href="#list" aria-label="Daybook home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64" role="img">
+            <rect x="3" y="3" width="58" height="58" rx="16" fill="#ffffff" stroke="#0f172a" stroke-width="4"></rect>
+            <path d="M18 33.5 27.5 43 46 21" fill="none" stroke="#16a34a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </span>
+        <div class="brand-copy">
+          <h1 class="brand-name">Daybook</h1>
+          <span class="brand-sub">Personal daily to-do</span>
+        </div>
+      </a>
+
+      <div class="header-center">
+        <div class="header-clock" aria-live="off">
+          <span id="clockTime" class="clock-time">--:--:--</span>
+          <span id="clockDate" class="clock-date">Loading today’s date…</span>
+        </div>
+        <div class="section-menu">
+          <label class="sr-only" for="sectionMenu">Go to a section</label>
+          <select id="sectionMenu" aria-label="Go to a section">
+            <option value="">Jump to…</option>
+            <option value="list">To-do list</option>
+            <option value="day:yesterday">Yesterday</option>
+            <option value="day:tomorrow">Tomorrow</option>
+            <option value="days">Yesterday, today, tomorrow</option>
+            <option value="stopwatch">Stopwatch</option>
+            <option value="goal">Daily goal</option>
+            <option value="week">Day to day</option>
+            <option value="flow">Flow chart</option>
+          </select>
         </div>
       </div>
-      <div class="header-side">
-        <div id="account" class="account"></div>
-        <div class="wall">
-          <p class="eyebrow">Now</p>
-          <p id="wall-clock" class="time wall-clock">--:--:--</p>
-          <p id="wall-date" class="quiet"></p>
-        </div>
-      </div>
+
+      <div id="profileArea" class="profile-area"></div>
     </header>
 
-    <nav class="section-nav" aria-label="Sections">
-      <label for="section-menu">Sections</label>
-      <select id="section-menu">
-        <option value="list">To-do list</option>
-        <option value="yesterday">Yesterday</option>
-        <option value="tomorrow">Tomorrow</option>
-        <option value="day-cards">Yesterday, today, tomorrow</option>
-        <option value="stopwatch">Stopwatch</option>
-        <option value="goal-panel">Daily goal</option>
-        <option value="history-panel">Day to day</option>
-        <option value="flow-panel">Flow chart</option>
-      </select>
-    </nav>
-
-    <dialog id="signup" class="signup">
-      <form id="signup-form">
-        <h2>Sign up</h2>
-        <p class="quiet">Your name, email, and picture stay on this computer. A friend who opens the same link signs up separately and sees their own name.</p>
-        <label for="signup-name">Name
-          <input id="signup-name" name="name" maxlength="80" autocomplete="name" required />
-        </label>
-        <label for="signup-email">Email
-          <input id="signup-email" name="email" type="email" maxlength="120" autocomplete="email" required />
-        </label>
-        <label for="signup-picture">Picture
-          <input id="signup-picture" name="picture" type="file" accept="image/*" />
-        </label>
-        <p id="signup-error" class="signup-error" hidden></p>
-        <div class="signup-actions">
-          <button type="button" class="btn" id="signup-cancel">Cancel</button>
-          <button type="submit" class="btn primary">Sign up</button>
-        </div>
-      </form>
-    </dialog>
-
-    <main class="workspace">
-      <section class="panel list-panel" id="list" aria-labelledby="list-title">
-        <div class="panel-head">
-          <div>
-            <h2 id="list-title">Today</h2>
-            <p id="list-date" class="quiet"></p>
-          </div>
-          <button type="button" class="btn" id="back-today" data-action="select-today" hidden>Back to today</button>
-        </div>
-        <p id="list-stats" class="quiet"></p>
-        <form id="composer" autocomplete="off">
-          <label id="composer-label" for="task-input">Add to today</label>
-          <div class="composer-row">
-            <input id="task-input" maxlength="140" autocomplete="off" autocapitalize="sentences" required placeholder="What do you need to do?" />
-            <button class="btn primary" type="submit">Add</button>
-          </div>
-        </form>
-        <div id="task-list"></div>
-        <div id="day-total" class="day-total" hidden></div>
-      </section>
-
-      <aside class="side">
-        <section id="day-cards" aria-label="Yesterday, today, and tomorrow">
-          <p class="empty">Loading your days…</p>
-        </section>
-
-        <section id="stopwatch" aria-label="Stopwatch">
-          <p class="empty">Loading the stopwatch…</p>
-        </section>
-
-        <section class="panel" id="goal-panel" aria-labelledby="goal-title">
-          <h2 id="goal-title">Daily goal</h2>
-          <p class="quiet intro">Set the hours you want to work every day.</p>
-          <form id="goal-form">
-            <div class="goal-fields">
-              <label>Hours
-                <input id="goal-hours" name="hours" type="number" min="0" max="24" step="1" inputmode="numeric" value="0" />
-              </label>
-              <label>Minutes
-                <input id="goal-minutes" name="minutes" type="number" min="0" max="59" step="1" inputmode="numeric" value="0" />
-              </label>
-              <button class="btn primary" type="submit">Set goal</button>
+    <main class="layout">
+      <div class="primary-column">
+        <section id="days" class="card days-card" aria-labelledby="daysTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Three days</p>
+              <h2 id="daysTitle">Yesterday, today, tomorrow</h2>
             </div>
-            <p id="goal-error" class="signup-error" hidden></p>
+            <p class="heading-note">Pick a day to open its list.</p>
+          </div>
+          <div id="dayCards" class="day-cards"></div>
+        </section>
+
+        <section id="list" class="card list-card" aria-labelledby="selectedTitle">
+          <div class="list-head">
+            <div>
+              <p class="eyebrow">To-do list</p>
+              <h2 id="selectedTitle">Today</h2>
+              <p id="selectedMeta" class="subtle selected-meta">No tasks yet</p>
+            </div>
+            <button id="backToday" class="btn btn-ghost back-today" type="button" hidden>Back to today</button>
+          </div>
+
+          <div id="moveNotice" class="move-notice" hidden></div>
+
+          <form id="addForm" class="add-row" novalidate>
+            <label class="sr-only" for="taskInput">New task</label>
+            <input id="taskInput" name="task" type="text" maxlength="140" placeholder="Add a task for today" autocomplete="off" enterkeyhint="done">
+            <button class="btn btn-primary add-btn" type="submit">Add task</button>
           </form>
-          <div id="goal-board"></div>
+
+          <ul id="taskList" class="task-list" aria-label="Tasks"></ul>
+          <div id="emptyState" class="empty-state" hidden>
+            <span class="empty-mark" aria-hidden="true">✓</span>
+            <p class="empty-title">A clear page.</p>
+            <p>Add a task above when you are ready.</p>
+          </div>
         </section>
 
-        <section class="panel" id="history-panel" aria-labelledby="history-title">
-          <h2 id="history-title">Day to day</h2>
-          <p class="quiet intro">Hours for the last seven days.</p>
-          <div id="history"></div>
+        <section id="stopwatch" class="card stopwatch-card" aria-labelledby="stopwatchTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Focus</p>
+              <h2 id="stopwatchTitle">Stopwatch</h2>
+            </div>
+            <p class="heading-note">A task timer, or a timer on its own.</p>
+          </div>
+
+          <div class="stopwatch-shell">
+            <div class="stopwatch-info">
+              <p id="stopwatchMode" class="stopwatch-mode">Stopwatch on its own</p>
+              <p id="stopwatchTime" class="stopwatch-time" aria-live="off">00:00:00</p>
+              <p id="stopwatchTask" class="stopwatch-task">Nothing is running. Start a task, or use the stopwatch by itself.</p>
+            </div>
+            <div id="stopwatchActions" class="stopwatch-actions"></div>
+          </div>
+          <p id="stopwatchToday" class="stopwatch-today"></p>
+        </section>
+      </div>
+
+      <aside class="side-column" aria-label="Progress and charts">
+        <section id="goal" class="card goal-card" aria-labelledby="goalTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Every day</p>
+              <h2 id="goalTitle">Daily goal</h2>
+            </div>
+            <p class="heading-note">One goal, from the day you set it.</p>
+          </div>
+
+          <form id="goalForm" class="goal-form" novalidate>
+            <div class="goal-inputs">
+              <label class="field compact">
+                <span>Hours</span>
+                <input id="goalHours" type="number" min="0" max="24" step="1" inputmode="numeric" placeholder="0">
+              </label>
+              <span class="goal-colon" aria-hidden="true">:</span>
+              <label class="field compact">
+                <span>Minutes</span>
+                <input id="goalMinutes" type="number" min="0" max="59" step="1" inputmode="numeric" placeholder="0">
+              </label>
+              <button class="btn btn-primary goal-save" type="submit">Set goal</button>
+            </div>
+            <p id="goalError" class="form-error" role="alert" hidden></p>
+            <p id="goalSince" class="subtle goal-since"></p>
+          </form>
+
+          <div id="goalStatus" class="goal-status is-neutral"></div>
+
+          <div class="goal-history-head">
+            <span>Last 7 days</span>
+            <span>Today first</span>
+          </div>
+          <div id="goalHistory" class="goal-history"></div>
         </section>
 
-        <section class="panel flow-panel" id="flow-panel" aria-labelledby="flow-title">
-          <h2 id="flow-title">Flow chart</h2>
-          <p class="quiet intro">The order you worked, with the time on each step.</p>
-          <div id="flow"></div>
+        <section id="week" class="card chart-card" aria-labelledby="weekTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Progress</p>
+              <h2 id="weekTitle">Day to day</h2>
+            </div>
+            <p class="heading-note">Last 7 days</p>
+          </div>
+
+          <div class="week-summary">
+            <div>
+              <span class="summary-label">Week total</span>
+              <strong id="weekTotal">0m</strong>
+            </div>
+            <div>
+              <span class="summary-label">All recorded days</span>
+              <strong id="allRecorded">0m</strong>
+            </div>
+          </div>
+
+          <div class="week-box">
+            <div id="weekChart" class="week-chart" role="img" aria-label="Last 7 days task time"></div>
+          </div>
+        </section>
+
+        <section id="flow" class="card chart-card flow-card" aria-labelledby="flowTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">The shape of the day</p>
+              <h2 id="flowTitle">Flow chart</h2>
+            </div>
+            <p id="flowMeta" class="heading-note">Today</p>
+          </div>
+          <div id="flowChart" class="flow-chart"></div>
         </section>
       </aside>
     </main>
 
-    <footer>
-      <p class="footnote byline">ABDU NAIM</p>
-      <p class="footnote">
-        <span id="save-note">Saved in this browser, on this computer.</span>
-        Clearing this site’s data clears your days.
-      </p>
+    <footer class="footer">
+      <span>Daybook</span>
+      <span class="footer-dot" aria-hidden="true">·</span>
+      <span class="footer-byline">ABDU NAIM</span>
     </footer>
   </div>
-  <p id="live" class="sr-only" aria-live="polite"></p>
-  <noscript>Daybook needs JavaScript to keep your list and your timer.</noscript>
-  <script src="app.js?v=12"></script>
+
+  <div id="announce" class="sr-only" aria-live="polite"></div>
+
+  <dialog id="profileDialog" class="profile-dialog" aria-labelledby="profileDialogTitle">
+    <form id="profileForm" class="profile-form" novalidate>
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Local profile</p>
+          <h2 id="profileDialogTitle">Create your profile</h2>
+        </div>
+        <button class="icon-btn" type="button" data-action="close-profile" aria-label="Close profile dialog">×</button>
+      </div>
+
+      <p class="dialog-copy">
+        This profile is saved only in this browser. There is no password, no shared account,
+        and nothing syncs to another computer. A friend who opens the same link gets their own
+        empty list and their own sign-up.
+      </p>
+
+      <label class="field">
+        <span>Name</span>
+        <input id="profileName" name="name" type="text" maxlength="80" autocomplete="name" required>
+      </label>
+
+      <label class="field">
+        <span>Email</span>
+        <input id="profileEmail" name="email" type="email" maxlength="120" autocomplete="email" required>
+      </label>
+
+      <div class="picture-row">
+        <div id="profilePreview" class="profile-preview" aria-hidden="true"></div>
+        <label class="file-field">
+          <span>Picture <small>(optional)</small></span>
+          <input id="profilePicture" name="picture" type="file" accept="image/*">
+          <span class="file-hint">Resized to a small 96px JPEG.</span>
+        </label>
+      </div>
+
+      <p id="profileError" class="form-error" role="alert" hidden></p>
+
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" type="button" data-action="close-profile">Cancel</button>
+        <button class="btn btn-primary" type="submit">Save profile</button>
+      </div>
+    </form>
+  </dialog>
+
+  <noscript>
+    <p class="noscript">Daybook needs JavaScript to keep your tasks and timers in this browser.</p>
+  </noscript>
 </body>
 </html>

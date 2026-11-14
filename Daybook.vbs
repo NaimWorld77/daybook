@@ -1,2 +1,11 @@
-Set shell = CreateObject("Wscript.Shell")
-shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""d:\Personal_website\Daybook.ps1""", 0, False
+Option Explicit
+
+Dim shell
+Dim fso
+Dim scriptPath
+
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+
+scriptPath = fso.BuildPath(fso.GetParentFolderName(WScript.ScriptFullName), "Daybook.ps1")
+shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & scriptPath & """", 0, False

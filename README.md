@@ -17,6 +17,8 @@ The blue checkbox marks a task done. Press the green tick again to reopen it. A 
 
 Only one task can run at a time. Starting another pauses the first. A running timer survives a refresh because the start time is stored as an absolute timestamp.
 
+The overview above the board shows today’s total tasks, completed count, and counted focus time. A small toast confirms saves and removals, and the empty state has a **Create a task** action that jumps to the add field.
+
 ### The stopwatch
 
 When a task is running, the stopwatch shows that task with **Pause** and **Mark done**. When no task is running, it is a stopwatch on its own with **Start** and **End**. Starting a task freezes the stopwatch-only timer. Stopwatch-only time is never added to a task, to today, or to the daily goal.
@@ -40,13 +42,15 @@ The last seven days appear today first.
 
 ### The charts
 
-**Day to day** shows the last seven days with the week total and the total across all recorded days. Today's bar is blue, other bars are light blue, and empty days are gray.
+**Day to day** shows the last seven days with the week total and the total across all recorded days. Today's bar is blue, other bars are light blue, and empty days are gray; the legend under the chart repeats those colors.
 
 **Flow chart** shows the tasks of the selected day in created order: a start node, each task step with its time and status, and a total node.
 
 ### Local profile
 
-The optional profile stores a name, email, and an optional picture only in this browser. A picture is resized to a 96px JPEG. Signing out removes only the profile; it keeps the tasks. There is no password, no shared account, and no sync to another computer.
+The optional profile stores a name, email, and an optional picture only in this browser. A picture is resized to a 96px JPEG. Click the avatar or name in the header to reopen the profile and change any of those details. Signing out removes only the profile; it keeps the tasks. There is no password, no shared account, and no sync to another computer.
+
+Action confirmations appear in a short toast at the bottom of the page, and the current date/time stays in the header.
 
 A friend who opens the same link gets an empty list and their own local sign-up.
 

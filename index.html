@@ -12,8 +12,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
-  <script src="app.js?v=3" defer></script>
+  <link rel="stylesheet" href="styles.css?v=4">
+  <script src="app.js?v=4" defer></script>
 </head>
 <body>
   <div class="page">
@@ -55,6 +55,56 @@
       <div id="profileArea" class="profile-area"></div>
     </header>
 
+    <section class="card overview-card" aria-labelledby="greeting">
+      <div class="overview-intro">
+        <p class="eyebrow">Today at a glance</p>
+        <h2 id="greeting" class="greeting">Good day, Abdu</h2>
+        <button class="btn btn-ghost btn-small overview-add" type="button" data-action="quick-add">Add a task</button>
+      </div>
+
+      <div class="stats-grid" aria-label="Today's overview">
+        <article class="stat-card">
+          <span class="stat-icon is-blue" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16M4 12h16M4 18h10"></path>
+            </svg>
+          </span>
+          <div class="stat-copy">
+            <p class="stat-label">Total tasks</p>
+            <strong id="statTotal" class="stat-value">0</strong>
+            <span class="stat-foot">On today’s list</span>
+          </div>
+        </article>
+
+        <article class="stat-card">
+          <span class="stat-icon is-green" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m5 12.5 4.5 4.5L19 7"></path>
+            </svg>
+          </span>
+          <div class="stat-copy">
+            <p class="stat-label">Completed</p>
+            <strong id="statDone" class="stat-value">0</strong>
+            <span id="statDoneFoot" class="stat-foot">No tasks yet</span>
+          </div>
+        </article>
+
+        <article class="stat-card">
+          <span class="stat-icon is-purple" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="8"></circle>
+              <path d="M12 7.5v5l3.2 2"></path>
+            </svg>
+          </span>
+          <div class="stat-copy">
+            <p class="stat-label">Focus time</p>
+            <strong id="statFocus" class="stat-value">0m</strong>
+            <span class="stat-foot">Counted today</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
     <main class="layout">
       <div class="primary-column">
         <section id="days" class="card days-card" aria-labelledby="daysTitle">
@@ -72,7 +122,10 @@
           <div class="list-head">
             <div>
               <p class="eyebrow">To-do list</p>
-              <h2 id="selectedTitle">Today</h2>
+              <div class="heading-line">
+                <h2 id="selectedTitle">Today</h2>
+                <span id="remainingCount" class="count-pill">0 remaining</span>
+              </div>
               <p id="selectedMeta" class="subtle selected-meta">No tasks yet</p>
             </div>
             <button id="backToday" class="btn btn-ghost back-today" type="button" hidden>Back to today</button>
@@ -91,6 +144,7 @@
             <span class="empty-mark" aria-hidden="true">✓</span>
             <p class="empty-title">A clear page.</p>
             <p>Add a task above when you are ready.</p>
+            <button class="btn btn-ghost btn-small empty-add" type="button" data-action="focus-add">Create a task</button>
           </div>
         </section>
 
@@ -174,6 +228,11 @@
           <div class="week-box">
             <div id="weekChart" class="week-chart" role="img" aria-label="Last 7 days task time"></div>
           </div>
+          <div class="chart-legend" aria-hidden="true">
+            <span><i class="legend-swatch is-today"></i>Today</span>
+            <span><i class="legend-swatch is-other"></i>Other days</span>
+            <span><i class="legend-swatch is-empty"></i>No time</span>
+          </div>
         </section>
 
         <section id="flow" class="card chart-card flow-card" aria-labelledby="flowTitle">
@@ -197,6 +256,7 @@
   </div>
 
   <div id="announce" class="sr-only" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <dialog id="profileDialog" class="profile-dialog" aria-labelledby="profileDialogTitle">
     <form id="profileForm" class="profile-form" novalidate>

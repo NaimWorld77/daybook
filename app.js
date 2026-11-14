@@ -31,7 +31,8 @@
     notice: null,
     noticeTimer: null,
     lastChartSecond: 0,
-    profilePictureDraft: ""
+    profilePictureDraft: "",
+    toastTimer: null
   };
 
   let els = {};
@@ -65,8 +66,15 @@
       clockTime: document.getElementById("clockTime"),
       clockDate: document.getElementById("clockDate"),
       profileArea: document.getElementById("profileArea"),
+      greeting: document.getElementById("greeting"),
+      statTotal: document.getElementById("statTotal"),
+      statDone: document.getElementById("statDone"),
+      statDoneFoot: document.getElementById("statDoneFoot"),
+      statFocus: document.getElementById("statFocus"),
       sectionMenu: document.getElementById("sectionMenu"),
       dayCards: document.getElementById("dayCards"),
+      remainingCount: document.getElementById("remainingCount"),
+      toast: document.getElementById("toast"),
       backToday: document.getElementById("backToday"),
       selectedTitle: document.getElementById("selectedTitle"),
       selectedMeta: document.getElementById("selectedMeta"),
@@ -331,6 +339,15 @@
         event.preventDefault();
         signOut();
         break;
+      case "focus-add":
+        event.preventDefault();
+        focusAddInput();
+        break;
+      case "quick-add":
+        event.preventDefault();
+        selectDay(state.todayKey, false);
+        focusAddInput();
+        break;
       case "select-day":
         selectDay(dayKey, false);
         break;
@@ -395,6 +412,13 @@
     section.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function focusAddInput() {
+    scrollToSection("list");
+    window.setTimeout(() => {
+      els.taskInput.focus();
+    }, 60);
+  }
+
   function selectDay(dayKey, scroll) {
     if (!isDayKey(dayKey)) return;
     state.selectedDay = dayKey;
@@ -419,6 +443,7 @@
 
     updateLiveTaskTimes(now);
     updateStopwatchLive(now);
+    renderOverview(now);
     updateListMeta(now);
     renderGoal(now);
     updateTabTitle(now);
@@ -572,9 +597,43 @@
     els.moveNotice.textContent = state.notice.text;
   }
 
+  function showToast(message) {
+    if (!els.toast) return;
+    els.toast.textContent = message;
+    els.toast.classList.add("show");
+    if (state.toastTimer) window.clearTimeout(state.toastTimer);
+    state.toastTimer = window.setTimeout(() => {
+      els.toast.classList.remove("show");
+    }, 3200);
+  }
+
+  function renderOverview(now) {
+    const tasks = getDayTasks(state.todayKey);
+    const total = tasks.length;
+    const done = tasks.filter((task) => task.status === "done").length;
+    const focus = dayCountedTotal(state.todayKey, now);
+
+    els.greeting.textContent = greetingText(now);
+    els.statTotal.textContent = String(total);
+    els.statDone.textContent = String(done);
+    els.statDoneFoot.textContent = total
+      ? Math.round((done / total) * 100) + "% of today’s tasks"
+      : "No tasks yet";
+    els.statFocus.textContent = formatDuration(focus);
+  }
+
+  function greetingText(now) {
+    const hour = new Date(now).getHours();
+    const prefix = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+    const rawName = state.profile && state.profile.name ? state.profile.name : "Abdu";
+    const firstName = rawName.trim().split(/\s+/)[0] || "Abdu";
+    return prefix + ", " + firstName;
+  }
+
   function renderAll() {
     const now = Date.now();
     renderProfile();
+    renderOverview(now);
     renderDays(now);
     renderListHeader(now);
     renderNotice();
@@ -603,11 +662,13 @@
 
     els.profileArea.innerHTML =
       '<div class="profile-chip">' +
-        avatar +
-        '<span class="profile-copy">' +
-          '<span class="profile-name">' + esc(name) + "</span>" +
-          '<span class="profile-email">' + esc(email) + "</span>" +
-        "</span>" +
+        '<button class="profile-open" type="button" data-action="open-profile" aria-label="Edit profile" title="Edit profile">' +
+          avatar +
+          '<span class="profile-copy">' +
+            '<span class="profile-name">' + esc(name) + "</span>" +
+            '<span class="profile-email">' + esc(email) + "</span>" +
+          "</span>" +
+        "</button>" +
         '<button class="signout" type="button" data-action="signout">Sign out</button>' +
       "</div>";
   }
@@ -635,7 +696,8 @@
     state.profile = null;
     state.profilePictureDraft = "";
     renderProfile();
-    els.announce.textContent = "Signed out. Your tasks are still here.";
+    renderOverview(Date.now());
+    showToast("Signed out. Your tasks are still here.");
   }
 
   function renderProfilePreview() {
@@ -736,7 +798,8 @@
     hideProfileError();
     els.profileDialog.close();
     renderProfile();
-    els.announce.textContent = "Profile saved only in this browser.";
+    renderOverview(Date.now());
+    showToast("Profile saved on this device.");
   }
 
   function isValidEmail(value) {
@@ -782,22 +845,24 @@
   function renderListHeader(now) {
     const label = dayLabel(state.selectedDay);
     els.selectedTitle.textContent = label;
-    els.selectedMeta.textContent = selectedDaySummary(now);
     els.backToday.hidden = state.selectedDay === state.todayKey;
     els.taskInput.placeholder = "Add a task for " + label.toLowerCase();
+    updateListMeta(now);
   }
 
   function selectedDaySummary(now) {
     const tasks = getDayTasks(state.selectedDay);
     if (!tasks.length) return "No tasks yet";
-    const open = tasks.filter((task) => task.status !== "done").length;
     const total = dayCountedTotal(state.selectedDay, now);
     return formatFullDate(state.selectedDay) + " · " + tasks.length + " task" +
-      (tasks.length === 1 ? "" : "s") + " · " + open + " open · " + formatDuration(total);
+      (tasks.length === 1 ? "" : "s") + " · " + formatDuration(total);
   }
 
   function updateListMeta(now) {
+    const tasks = getDayTasks(state.selectedDay);
+    const open = tasks.filter((task) => task.status !== "done").length;
     if (els.selectedMeta) els.selectedMeta.textContent = selectedDaySummary(now);
+    if (els.remainingCount) els.remainingCount.textContent = open + " remaining";
   }
 
   function renderTasks(now) {
@@ -1040,6 +1105,7 @@
       renderTasks(Date.now());
     }, 4500);
     renderTasks(Date.now());
+    showToast("Press Delete again to remove this task.");
   }
 
   function clearDeleteConfirmation() {
@@ -1058,6 +1124,7 @@
     clearDeleteConfirmation();
     persistData();
     renderAll();
+    showToast("Task removed.");
   }
 
   function pauseRunningTask(now, exceptId) {
@@ -1326,6 +1393,7 @@
     persistGoal();
     syncGoalForm(true);
     renderAll();
+    showToast("Daily goal saved.");
   }
 
   function showGoalError(message) {
